@@ -28,6 +28,7 @@ class TensorNameMap:
             "embedding.word_embeddings",                 # chatglm
             "transformer.token_embeddings",              # openelm
             "shared",                                    # t5
+            "emb.0.weight",                              # muscriptor
             "rwkv.embeddings",                           # rwkv6
             "model.embeddings",                          # rwkv7
             "model.word_embeddings",                     # bailingmoe
@@ -63,6 +64,7 @@ class TensorNameMap:
             "model.layers.0.pre_norm",    # rwkv7
             "backbone.norm",              # wavtokenizer
             "model.embedding_norm",       # lfm2
+            "out_norm.weight",            # muscriptor
         ),
 
         # Position embeddings
@@ -82,6 +84,7 @@ class TensorNameMap:
             "lm_head.linear",            # phi2
             "output_layer",              # chatglm
             "head",                      # rwkv
+            "linears.0.weight",          # muscriptor
             "head.out",                  # wavtokenizer
             "lm_head",                   # llama4
             "model.transformer.ff_out",  # llada
@@ -210,6 +213,7 @@ class TensorNameMap:
             "model.layers.{bid}.input_layernorm",                   # llama4
             "layers.{bid}.input_layernorm",                         # embeddinggemma
             "transformer_encoder.{bid}.attention_norm",             # neobert
+            "transformer.layers.{bid}.norm1",                        # muscriptor
             "layers.{bid}.attn_norm",                               # modern-bert
             "model.layers.{bid}.operator_norm",                     # lfm2
             "model.transformer.blocks.{bid}.attn_norm",             # llada
@@ -269,6 +273,7 @@ class TensorNameMap:
             "layers.{bid}.self_attn.q_proj",                             # qwen3-embedding
             "backbone.layers.{bid}.mixer.q_proj",                        # nemotron-h
             "model.blocks.{bid}.attn.attn_query",                        # talkie
+            "transformer.layers.{bid}.self_attn.q_proj",                  # muscriptor
         ),
 
         # Attention key
@@ -289,7 +294,8 @@ class TensorNameMap:
             "model.transformer.blocks.{bid}.k_proj",                   # llada
             "layers.{bid}.self_attn.k_proj",                           # qwen3-embedding
             "backbone.layers.{bid}.mixer.k_proj",                      # nemotron-h
-            "model.blocks.{bid}.attn.attn_key",                        # talkie
+            "model.blocks.{bid}.attn.attn_key",                          # talkie
+            "transformer.layers.{bid}.self_attn.k_proj",                  # muscriptor
         ),
 
         # Attention value
@@ -310,6 +316,7 @@ class TensorNameMap:
             "layers.{bid}.self_attn.v_proj",                             # qwen3-embedding
             "backbone.layers.{bid}.mixer.v_proj",                        # nemotron-h
             "model.blocks.{bid}.attn.attn_value",                        # talkie
+            "transformer.layers.{bid}.self_attn.v_proj",                  # muscriptor
         ),
 
         # Attention output
@@ -349,6 +356,7 @@ class TensorNameMap:
             "backbone.layers.{bid}.mixer.o_proj",                           # nemotron-h
             "model.layers.{bid}.self_attn.language_expert_dense",           # cogvlm
             "model.blocks.{bid}.attn.attn_resid",                           # talkie
+            "transformer.layers.{bid}.self_attn.out_proj.weight",            # muscriptor (via split)
         ),
 
         # Attention output norm
@@ -412,6 +420,7 @@ class TensorNameMap:
             "model.layers.{bid}.feedforward_layernorm",                      # apertus
             "model.layers.{bid}.pre_mlp_layernorm",                          # kormo
             "layers.{bid}.mlp_norm"                                          # modern-bert
+            "transformer.layers.{bid}.norm2",                                # muscriptor
         ),
 
         # Pre feed-forward norm
@@ -522,6 +531,7 @@ class TensorNameMap:
             "backbone.layers.{bid}.mixer.up_proj",                    # nemotron-h
             "model.layers.{bid}.mlp.language_mlp.up_proj",            # cogvlm
             "model.blocks.{bid}.mlp.mlp_linear",                      # talkie
+            "transformer.layers.{bid}.linear1",                          # muscriptor
         ),
 
         MODEL_TENSOR.FFN_UP_EXP: (
@@ -652,6 +662,7 @@ class TensorNameMap:
             "backbone.layers.{bid}.mixer.down_proj",                  # nemotron-h
             "model.layers.{bid}.mlp.language_mlp.down_proj",          # cogvlm
             "model.blocks.{bid}.mlp.mlp_resid",                       # talkie
+            "transformer.layers.{bid}.linear2",                          # muscriptor
         ),
 
         MODEL_TENSOR.FFN_DOWN_EXP: (

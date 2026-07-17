@@ -191,6 +191,8 @@ struct server_slot {
     int32_t n_remaining = -1;
     int32_t i_batch     = -1;
 
+    int32_t n_embd_prefix = 0; // number of embedding vectors decoded before text tokens
+
     int32_t n_prompt_tokens_cache     = 0;
     int32_t n_prompt_tokens_processed = 0;
 
@@ -295,6 +297,7 @@ struct server_slot {
         SLT_DBG(*this, "%s", "\n");
 
         n_prompt_tokens_cache = 0;
+        n_embd_prefix = 0;
 
         last_nl_pos    = 0;
         generated_text = "";
@@ -442,10 +445,9 @@ struct server_slot {
     void handle_last_sampled_token(server_batch & batch) {
         bool add_ok = true;
         if (spec_draft.empty()) {
-            // no speculative decoding
             i_batch = batch.size();
 
-            add_ok &= batch.add(id, sampled, prompt.tokens.pos_next(), true);
+            add_ok &= batch.add(id, sampled, n_embd_prefix + prompt.tokens.pos_next(), true);
 
             SLT_DBG(*this, "slot decode token, id=%d, n_ctx = %d, n_tokens = %d, truncated = %d\n",
                     sampled, n_ctx, prompt.n_tokens(), truncated);
@@ -460,7 +462,7 @@ struct server_slot {
                 spec_i_batch.push_back(batch.size() + i + 1);
             }
 
-            auto pos0 = prompt.tokens.pos_next();
+            auto pos0 = n_embd_prefix + prompt.tokens.pos_next();
 
             add_ok &= batch.add(id, sampled, pos0++, true);
             for (auto token : spec_draft) {
@@ -488,6 +490,15 @@ struct server_slot {
             // do not keep context of the child slots - the parent's context is enough
             if (task->is_child()) {
                 prompt_clear();
+            }
+
+            // For COMPLETION_EMBD, always clear KV cache on release to prevent
+            // residual embedding prefixes from polluting subsequent requests
+            if (task->type == SERVER_TASK_TYPE_COMPLETION_EMBD) {
+                common_context_seq_rm(ctx_tgt, id, -1, -1);
+                if (ctx_dft) {
+                    common_context_seq_rm(ctx_dft, id, -1, -1);
+                }
             }
 
             reset();
@@ -775,6 +786,61 @@ struct server_slot {
         }
 
         return try_decode();
+    }
+
+    // decode a prefix of raw float embeddings into the KV cache
+    // returns 0 on success, -1 on failure
+    // n_tokens_out is set to the number of embedding tokens processed
+    int process_embd_prefix(const float * embd, int32_t n_embd_tok, int32_t n_embd_dim, size_t & n_tokens_out) {
+        GGML_ASSERT(embd != nullptr);
+        GGML_ASSERT(n_embd_tok > 0);
+        GGML_ASSERT(n_embd_dim > 0);
+
+        const int32_t n_batch_size = llama_n_batch(ctx_tgt);
+        const llama_pos pos_0 = prompt.tokens.pos_next();
+        const llama_seq_id seq_id = id;
+
+        std::vector<llama_pos>      pos(n_embd_tok);
+        std::vector<int32_t>        n_seq_id_vec(n_embd_tok, 1);
+        std::vector<llama_seq_id>   seq_id_0 = {seq_id};
+        std::vector<llama_seq_id *> seq_ids(n_embd_tok + 1);
+        std::vector<int8_t>         logits(n_embd_tok, 0);
+        for (int32_t i = 0; i < n_embd_tok; i++) {
+            pos[i]     = pos_0 + i;
+            seq_ids[i] = seq_id_0.data();
+        }
+        seq_ids[n_embd_tok] = nullptr;
+
+        int32_t i_batch = 0;
+        int32_t n_batches = (n_embd_tok + n_batch_size - 1) / n_batch_size;
+        while (i_batch < n_batches) {
+            int32_t pos_offset = i_batch * n_batch_size;
+            int32_t n_tok_batch = std::min(n_batch_size, n_embd_tok - pos_offset);
+
+            llama_batch batch_view = {
+                n_tok_batch,
+                nullptr,
+                const_cast<float *>(embd) + pos_offset * n_embd_dim,
+                pos.data() + pos_offset,
+                n_seq_id_vec.data() + pos_offset,
+                seq_ids.data() + pos_offset,
+                logits.data() + pos_offset,
+            };
+
+            SLT_TRC(*this, "decoding embd batch %d/%d, n_tokens = %d, pos = %d\n",
+                    i_batch + 1, n_batches, n_tok_batch, pos_0 + pos_offset);
+
+            int32_t ret = llama_decode(ctx_tgt, batch_view);
+            if (ret != 0) {
+                SLT_ERR(*this, "failed to decode embd batch, ret = %d\n", ret);
+                return -1;
+            }
+
+            i_batch++;
+        }
+
+        n_tokens_out = n_embd_tok;
+        return 0;
     }
 };
 
@@ -1245,10 +1311,8 @@ private:
         const int n_ctx_train = llama_model_n_ctx_train(model_tgt);
 
         int n_ctx_slot = llama_n_ctx_seq(ctx_tgt);
-        if (n_ctx_slot > n_ctx_train) {
-            SRV_WRN("the slot context (%d) exceeds the training context of the model (%d) - capping\n", n_ctx_slot, n_ctx_train);
-            n_ctx_slot = n_ctx_train;
-        }
+        // Don't cap to n_ctx_train for muscriptor - sinusoidal position embeddings
+        // can extrapolate beyond training length
 
         slots.clear();
 
@@ -2338,6 +2402,7 @@ private:
     void process_single_task(server_task && task) {
         switch (task.type) {
             case SERVER_TASK_TYPE_COMPLETION:
+            case SERVER_TASK_TYPE_COMPLETION_EMBD:
             case SERVER_TASK_TYPE_INFILL:
             case SERVER_TASK_TYPE_EMBEDDING:
             case SERVER_TASK_TYPE_RERANK:
@@ -2881,7 +2946,7 @@ private:
 
                 if (ctx_dft) {
                     common_context_seq_rm (ctx_dft, slot.id, n_keep            , n_keep + n_discard);
-                    common_context_seq_add(ctx_dft, slot.id, n_keep + n_discard, slot.prompt.tokens.pos_next(), -n_discard);
+                    common_context_seq_add(ctx_dft, slot.id, n_keep + n_discard, slot.n_embd_prefix + slot.prompt.tokens.pos_next(), -n_discard);
                 }
 
                 // add generated tokens to cache
@@ -2948,7 +3013,7 @@ private:
                         GGML_ASSERT(slot.spec_i_batch.empty());
 
                         slot.spec_ckpt.update_pos(
-                                slot.prompt.n_tokens(),
+                                slot.n_embd_prefix + slot.prompt.n_tokens(),
                                 llama_memory_seq_pos_min(llama_get_memory(ctx_tgt), slot.id),
                                 llama_memory_seq_pos_max(llama_get_memory(ctx_tgt), slot.id));
 
@@ -2961,7 +3026,7 @@ private:
                         common_speculative_get_draft_params(spec.get(), slot.id) = {
                             /* .drafting = */ true,
                             /* .n_max    = */ n_draft_max,
-                            /* .n_past   = */ slot.prompt.n_tokens(),
+                            /* .n_past   = */ slot.n_embd_prefix + slot.prompt.n_tokens(),
                             /* .id_last  = */ slot.sampled,
                             /* .prompt   = */ &slot.spec_prompt,
                             /* .result   = */ &slot.spec_draft,
@@ -3370,7 +3435,7 @@ private:
                     slot.print_timings_pp();
 
                     // truncate any tokens that are beyond n_past for this slot
-                    const llama_pos p0 = slot.prompt.tokens.pos_next();
+                    const llama_pos p0 = slot.n_embd_prefix + slot.prompt.tokens.pos_next();
 
                     SLT_TRC(slot, "cached n_tokens = %d, memory_seq_rm [%d, end)\n", slot.prompt.n_tokens(), p0);
 
@@ -3409,6 +3474,34 @@ private:
                             n_swa > 0);
 
                     bool has_mtmd = false;
+
+                    // process raw embedding prefix (SERVER_TASK_TYPE_COMPLETION_EMBD)
+                    if (slot.task->type == SERVER_TASK_TYPE_COMPLETION_EMBD && slot.task->n_embd_tokens > 0 && slot.n_embd_prefix == 0) {
+                        // clear any residual KV cache from previous requests on this slot
+                        common_context_seq_rm(ctx_tgt, slot.id, -1, -1);
+                        if (ctx_dft) {
+                            common_context_seq_rm(ctx_dft, slot.id, -1, -1);
+                        }
+
+                        const int32_t n_embd_dim = llama_model_n_embd_inp(model_tgt);
+                        size_t n_tokens_out = 0;
+                        int32_t res = slot.process_embd_prefix(
+                            slot.task->input_embd.data(),
+                            slot.task->n_embd_tokens,
+                            n_embd_dim,
+                            n_tokens_out);
+                        if (res != 0) {
+                            SLT_ERR(slot, "failed to process embd prefix, res = %d\n", res);
+                            send_error(slot, "failed to process embedding prefix", ERROR_TYPE_SERVER);
+                            slot.release();
+                            return;
+                        }
+
+                        slot.n_prompt_tokens_processed += n_tokens_out;
+                        slot.n_embd_prefix = slot.task->n_embd_tokens;
+
+                        SLT_INF(slot, "processed embd prefix, n_embd_tokens = %d\n", slot.task->n_embd_tokens);
+                    }
 
                     // check if we should process the image
                     while (true) {
@@ -3465,7 +3558,7 @@ private:
                         // streaming hook can mirror t_h_nextn into ctx_dft.
                         add_ok &= batch.add(slot.id,
                             cur_tok,
-                            slot.prompt.tokens.pos_next(),
+                            slot.n_embd_prefix + slot.prompt.tokens.pos_next(),
                             slot.need_embd());
                         slot.prompt.tokens.push_back(cur_tok);
 
@@ -3543,8 +3636,8 @@ private:
                         do_checkpoint = false;
                     }
 
-                    // do not checkpoint after mtmd chunks
-                    do_checkpoint = do_checkpoint && !has_mtmd;
+                    // do not checkpoint after mtmd chunks or embd prefix
+                    do_checkpoint = do_checkpoint && !has_mtmd && slot.task->n_embd_tokens == 0;
 
                     // no need to create checkpoints that are too close together, unless it's the last user message
                     do_checkpoint = do_checkpoint && (
@@ -3884,9 +3977,9 @@ private:
             slot.sampled = ids.back(); // last accepted token
             SLT_DBG(slot, "add accepted tokens: sampled=%d, ids.size=%zu, n_draft=%zu\n", slot.sampled, ids.size(), n_draft);
 
-            common_context_seq_rm(slot.ctx_tgt, slot.id, slot.prompt.tokens.pos_next(), -1);
+            common_context_seq_rm(slot.ctx_tgt, slot.id, slot.n_embd_prefix + slot.prompt.tokens.pos_next(), -1);
             if (slot.ctx_dft) {
-                common_context_seq_rm(slot.ctx_dft, slot.id, slot.prompt.tokens.pos_next(), -1);
+                common_context_seq_rm(slot.ctx_dft, slot.id, slot.n_embd_prefix + slot.prompt.tokens.pos_next(), -1);
             }
 
             for (size_t i = 0; i < ids.size(); ++i) {
@@ -4041,7 +4134,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             const json & data,
             const std::vector<raw_buffer> & files,
             task_response_type res_type) {
-    GGML_ASSERT(type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL);
+    GGML_ASSERT(type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_COMPLETION_EMBD || type == SERVER_TASK_TYPE_INFILL);
 
     auto res = create_response();
     auto completion_id = gen_chatcmplid();
@@ -4103,6 +4196,28 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
 
             task.id_slot = json_value(data, "id_slot", -1);
             sse_ping_interval = task.params.sse_ping_interval;
+
+            // parse input embeddings for COMPLETION_EMBD
+            if (type == SERVER_TASK_TYPE_COMPLETION_EMBD && data.contains("input_embd")) {
+                const auto & embd_data = data.at("input_embd");
+                if (!embd_data.is_array() || embd_data.empty()) {
+                    throw std::invalid_argument("input_embd must be a non-empty array of float arrays");
+                }
+                // input_embd is [[float, float, ...], [float, float, ...], ...]
+                // each inner array is one embedding vector of size n_embd
+                task.n_embd_tokens = (int32_t)embd_data.size();
+                const size_t n_embd_dim = embd_data[0].size();
+                task.input_embd.reserve(task.n_embd_tokens * n_embd_dim);
+                for (int32_t t = 0; t < task.n_embd_tokens; t++) {
+                    const auto & row = embd_data[t];
+                    if (row.size() != n_embd_dim) {
+                        throw std::invalid_argument("all embedding vectors must have the same dimension");
+                    }
+                    for (size_t d = 0; d < n_embd_dim; d++) {
+                        task.input_embd.push_back(row[d].get<float>());
+                    }
+                }
+            }
 
             // OAI-compat
             task.params.res_type          = res_type;
@@ -4662,6 +4777,18 @@ void server_routes::init_routes() {
         return handle_completions_impl(
             req,
             SERVER_TASK_TYPE_COMPLETION,
+            body,
+            files,
+            TASK_RESPONSE_TYPE_NONE);
+    };
+
+    this->post_completions_embd = [this](const server_http_req & req) {
+        auto res = create_response();
+        std::vector<raw_buffer> files; // dummy
+        const json body = json::parse(req.body);
+        return handle_completions_impl(
+            req,
+            SERVER_TASK_TYPE_COMPLETION_EMBD,
             body,
             files,
             TASK_RESPONSE_TYPE_NONE);

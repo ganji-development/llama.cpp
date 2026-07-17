@@ -135,6 +135,7 @@ struct server_routes {
     server_http_context::handler_t post_props;
     server_http_context::handler_t post_infill;
     server_http_context::handler_t post_completions;
+    server_http_context::handler_t post_completions_embd;
     server_http_context::handler_t post_completions_oai;
     server_http_context::handler_t post_chat_completions;
     server_http_context::handler_t post_chat_completions_tok;

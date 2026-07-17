@@ -15,6 +15,7 @@ using json = nlohmann::ordered_json;
 
 enum server_task_type {
     SERVER_TASK_TYPE_COMPLETION,
+    SERVER_TASK_TYPE_COMPLETION_EMBD,
     SERVER_TASK_TYPE_EMBEDDING,
     SERVER_TASK_TYPE_RERANK,
     SERVER_TASK_TYPE_INFILL,
@@ -153,6 +154,11 @@ struct server_task {
     task_params   params;
     server_tokens tokens;
 
+    // used by SERVER_TASK_TYPE_COMPLETION_EMBD: raw float embeddings prepended before tokens
+    // layout: [n_embd_tokens * n_embd] in row-major order (each row is one embedding vector)
+    std::vector<float> input_embd;
+    int32_t n_embd_tokens = 0; // number of embedding vectors in input_embd
+
     // only used by CLI, this allow tokenizing CLI inputs on server side
     // we need this because mtmd_context and vocab are not accessible outside of server_context
     bool                    cli = false;
@@ -196,6 +202,7 @@ struct server_task {
     bool need_logits() const {
         switch (type) {
             case SERVER_TASK_TYPE_COMPLETION:
+            case SERVER_TASK_TYPE_COMPLETION_EMBD:
             case SERVER_TASK_TYPE_INFILL:
                 return true;
             default:
@@ -206,6 +213,7 @@ struct server_task {
     bool need_sampling() const {
         switch (type) {
             case SERVER_TASK_TYPE_COMPLETION:
+            case SERVER_TASK_TYPE_COMPLETION_EMBD:
             case SERVER_TASK_TYPE_INFILL:
                 return true;
             default:

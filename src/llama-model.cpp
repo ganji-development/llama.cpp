@@ -122,6 +122,8 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
             return new llama_model_plamo3(params);
         case LLM_ARCH_GPT2:
             return new llama_model_gpt2(params);
+        case LLM_ARCH_MUSCRIPTOR:
+            return new llama_model_muscriptor(params);
         case LLM_ARCH_CODESHELL:
             return new llama_model_codeshell(params);
         case LLM_ARCH_ORION:
@@ -2444,6 +2446,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
         case LLM_ARCH_NEMOTRON_H:
         case LLM_ARCH_NEMOTRON_H_MOE:
         case LLM_ARCH_KIMI_LINEAR:
+        case LLM_ARCH_MUSCRIPTOR:
             return LLAMA_ROPE_TYPE_NONE;
 
         // use what we call a normal RoPE, operating on pairs of consecutive head values
