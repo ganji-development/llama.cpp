@@ -494,10 +494,7 @@ struct server_slot {
             // For COMPLETION_EMBD, always clear KV cache on release to prevent
             // residual embedding prefixes from polluting subsequent requests
             if (task->type == SERVER_TASK_TYPE_COMPLETION_EMBD) {
-                common_context_seq_rm(ctx_tgt, id, -1, -1);
-                if (ctx_dft) {
-                    common_context_seq_rm(ctx_dft, id, -1, -1);
-                }
+                mem.seq_rm(id, -1, -1);
             }
 
             reset();
@@ -3467,10 +3464,7 @@ private:
                     // process raw embedding prefix (SERVER_TASK_TYPE_COMPLETION_EMBD)
                     if (slot.task->type == SERVER_TASK_TYPE_COMPLETION_EMBD && slot.task->n_embd_tokens > 0 && slot.n_embd_prefix == 0) {
                         // clear any residual KV cache from previous requests on this slot
-                        common_context_seq_rm(ctx_tgt, slot.id, -1, -1);
-                        if (ctx_dft) {
-                            common_context_seq_rm(ctx_dft, slot.id, -1, -1);
-                        }
+                        slot.mem.seq_rm(slot.id, -1, -1);
 
                         const int32_t n_embd_dim = llama_model_n_embd_inp(model_tgt);
                         size_t n_tokens_out = 0;
