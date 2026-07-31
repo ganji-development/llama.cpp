@@ -993,6 +993,14 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                     default: type = LLM_TYPE_UNKNOWN;
                 }
             } break;
+        case LLM_ARCH_MOSS_MUSIC:
+            {
+                // audio DeepStack widens the input embedding row; see
+                // llm_build_moss_music
+                ml.get_key(LLM_KV_NUM_DEEPSTACK_LAYERS, hparams.n_deepstack_layers, false);
+            }
+            // fall through: the backbone is a stock Qwen3
+            [[fallthrough]];
         case LLM_ARCH_QWEN3:
             {
                 ml.get_key(LLM_KV_POOLING_TYPE, hparams.pooling_type, false);
@@ -3649,6 +3657,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                 } break;
             case LLM_ARCH_QWEN3:
             case LLM_ARCH_QWEN3VL:
+            case LLM_ARCH_MOSS_MUSIC:
                 {
                     tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, 0);
 
@@ -8362,6 +8371,11 @@ ggml_cgraph * llama_model::build_graph(const llm_graph_params & params) const {
             {
                 llm = std::make_unique<llm_build_qwen3>(*this, params);
             } break;
+        case LLM_ARCH_MOSS_MUSIC:
+            {
+                // Qwen3 backbone + audio DeepStack injection
+                llm = std::make_unique<llm_build_moss_music>(*this, params);
+            } break;
         case LLM_ARCH_MOSS_TTS_DELAY:
             {
                 llm = std::make_unique<llm_build_moss_tts_delay>(*this, params);
@@ -8949,6 +8963,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
         case LLM_ARCH_QWEN2MOE:
         case LLM_ARCH_QWEN3:
         case LLM_ARCH_MOSS_TTS_DELAY:
+        case LLM_ARCH_MOSS_MUSIC:
         case LLM_ARCH_QWEN3MOE:
         case LLM_ARCH_LLADA_MOE:
         case LLM_ARCH_RND1:

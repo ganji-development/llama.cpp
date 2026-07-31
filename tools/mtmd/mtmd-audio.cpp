@@ -260,6 +260,8 @@ struct filter_params {
     int32_t hop_length;
     int32_t sample_rate;
     bool    center_padding = false;
+    bool    center_reflect = false; // reflect instead of zeros for center padding (librosa/HF default)
+    bool    drop_last_frame = false; // HF WhisperFeatureExtractor does log_spec[:, :-1]
     float   preemph = 0.f;
     bool    use_natural_log = false;
     bool    norm_per_feature = false;
@@ -366,6 +368,17 @@ static bool log_mel_spectrogram(
         const auto pad_amount = frame_size / 2;
         samples_padded = std::vector<float>(n_samples + 2 * pad_amount, 0);
         std::copy(samples, samples + n_samples, samples_padded.data() + pad_amount);
+        if (params.center_reflect) {
+            // np.pad(x, pad, "reflect"): mirror around the edge samples,
+            // excluding the edge itself
+            if (n_samples < (size_t) pad_amount + 1) {
+                LOG_ERR("%s: not enough samples for reflect padding\n", __func__);
+                return false;
+            }
+            std::reverse_copy(samples + 1, samples + 1 + pad_amount, samples_padded.begin());
+            std::reverse_copy(samples + n_samples - 1 - pad_amount, samples + n_samples - 1,
+                              samples_padded.begin() + pad_amount + n_samples);
+        }
         samples = samples_padded.data();
         n_samples = samples_padded.size();
     } else {
@@ -434,6 +447,18 @@ static bool log_mel_spectrogram(
         for (int iw = 0; iw < n_threads - 1; ++iw) {
             workers[iw].join();
         }
+    }
+
+    // HF WhisperFeatureExtractor drops the trailing frame (log_spec[:, :-1])
+    // before clamping, so the max below must be taken over the truncated data
+    if (params.drop_last_frame && out.n_len > 1) {
+        const int n_len_new = out.n_len - 1;
+        for (int i = 0; i < out.n_mel; i++) {
+            auto src = out.data.begin() + (size_t) i * out.n_len;
+            std::copy(src, src + n_len_new, out.data.begin() + (size_t) i * n_len_new);
+        }
+        out.n_len = n_len_new;
+        out.data.resize((size_t) out.n_mel * out.n_len);
     }
 
     const int effective_n_len = n_samples_in / frame_step;
@@ -572,6 +597,94 @@ bool mtmd_audio_preprocessor_whisper::preprocess(const float *                 s
         for (int i = 0; i < out_full.n_mel; i++) {
             auto src = out_full.data.begin() + i * out_full.n_len + off;
             out_chunk.data.insert(out_chunk.data.end(), src, src + frames_per_chunk);
+        }
+
+        output.push_back(std::move(out_chunk));
+    }
+
+    return true;
+}
+
+//
+// mtmd_audio_preprocessor_moss
+//
+
+void mtmd_audio_preprocessor_moss::initialize() {
+    cache.fill_sin_cos_table(hparams.audio_n_fft);
+    cache.fill_hann_window(hparams.audio_window_len, true);
+    cache.fill_mel_filterbank_matrix(hparams.n_mel_bins, hparams.audio_n_fft, hparams.audio_sample_rate);
+}
+
+bool mtmd_audio_preprocessor_moss::preprocess(const float *                 samples,
+                                              size_t                        n_samples,
+                                              std::vector<mtmd_audio_mel> & output) {
+    if (n_samples == 0) {
+        // empty audio
+        return false;
+    }
+
+    // MOSS runs WhisperFeatureExtractor directly on the waveform: no 30s silence
+    // pad and no truncation, so unlike the whisper preprocessor we only pad up
+    // to the minimum the STFT itself needs (reflect padding needs > n_fft/2).
+    std::vector<float> smpl;
+    const size_t min_samples = (size_t) hparams.audio_sample_rate; // 1 second
+    if (n_samples < min_samples) {
+        smpl.resize(min_samples, 0.0f);
+        std::memcpy(smpl.data(), samples, n_samples * sizeof(float));
+        samples   = smpl.data();
+        n_samples = smpl.size();
+    }
+
+    filter_params params;
+    params.n_mel            = hparams.n_mel_bins;
+    params.n_fft_bins       = 1 + (hparams.audio_n_fft / 2);
+    params.hann_window_size = hparams.audio_window_len;
+    params.hop_length       = hparams.audio_hop_len;
+    params.sample_rate      = hparams.audio_sample_rate;
+    params.center_padding   = true;   // HF spectrogram(center=True)
+    params.center_reflect   = true;   // ... with pad_mode="reflect"
+    params.drop_last_frame  = true;   // ... and log_spec[:, :-1]
+    params.preemph          = 0.0f;
+    params.use_natural_log  = false;  // log10
+    params.norm_per_feature = false;  // whisper clamp: max-8, then (x+4)/4
+
+    // make sure the cache is initialized
+    GGML_ASSERT(!cache.sin_vals.empty());
+    GGML_ASSERT(!cache.cos_vals.empty());
+    GGML_ASSERT(!cache.filters.data.empty());
+
+    mtmd_audio_mel out_full;
+    bool           ok = log_mel_spectrogram(samples, n_samples,
+                                            4,  // n_threads
+                                            params, cache, out_full);
+    if (!ok) {
+        return false;
+    }
+
+    if (DEBUG) {
+        printf("output: n_mel = %d, n_len = %d\n", out_full.n_mel, out_full.n_len);
+    }
+
+    // The encoder's position table caps the number of output tokens, so cap the
+    // mel at chunk_len seconds worth of frames. Unlike the whisper preprocessor
+    // we keep the trailing partial chunk: there is no silence padding here, so
+    // dropping it would silently discard real audio.
+    const size_t frames_per_chunk =
+        (size_t) hparams.audio_chunk_len * hparams.audio_sample_rate / hparams.audio_hop_len;
+    GGML_ASSERT(frames_per_chunk > 0);
+
+    for (size_t off = 0; off < (size_t) out_full.n_len; off += frames_per_chunk) {
+        const size_t n_len = std::min(frames_per_chunk, (size_t) out_full.n_len - off);
+
+        mtmd_audio_mel out_chunk;
+        out_chunk.n_len     = (int) n_len;
+        out_chunk.n_mel     = out_full.n_mel;
+        out_chunk.n_len_org = (int) n_len;
+        out_chunk.data.reserve((size_t) out_chunk.n_mel * n_len);
+
+        for (int i = 0; i < out_full.n_mel; i++) {
+            auto src = out_full.data.begin() + (size_t) i * out_full.n_len + off;
+            out_chunk.data.insert(out_chunk.data.end(), src, src + n_len);
         }
 
         output.push_back(std::move(out_chunk));

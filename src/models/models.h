@@ -527,6 +527,10 @@ struct llm_build_qwen3 : public llm_graph_context {
     llm_build_qwen3(const llama_model & model, const llm_graph_params & params);
 };
 
+struct llm_build_moss_music : public llm_graph_context {
+    llm_build_moss_music(const llama_model & model, const llm_graph_params & params);
+};
+
 struct llm_build_qwen3moe : public llm_graph_context {
     llm_build_qwen3moe(const llama_model & model, const llm_graph_params & params);
 };

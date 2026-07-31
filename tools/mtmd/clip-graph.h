@@ -52,13 +52,16 @@ struct clip_graph {
     // build vision transformer (ViT) cgraph
     // this function should cover most of the models
     // if your model has specific features, you should probably duplicate this function
+    // if layers_out is non-null, the output of every encoder layer is appended
+    // to it (used by moss-music to feed its DeepStack mergers)
     ggml_tensor * build_vit(
                 ggml_tensor * inp,
                 int64_t n_pos,
                 norm_type norm_t,
                 ffn_op_type ffn_t,
                 ggml_tensor * learned_pos_embd,
-                std::function<ggml_tensor *(ggml_tensor *, const clip_layer &)> add_pos);
+                std::function<ggml_tensor *(ggml_tensor *, const clip_layer &)> add_pos,
+                std::vector<ggml_tensor *> * layers_out = nullptr);
 
     // build the input after conv2d (inp_raw --> patches)
     // returns tensor with shape [n_embd, n_patches]

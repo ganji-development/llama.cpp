@@ -1700,6 +1700,7 @@ class TensorNameMap:
         MODEL_TENSOR.A_ENC_EMBD_POS: (
             "audio_tower.embed_positions", # ultravox
             "audio_embedding.embedding", # lfm2
+            "audio_encoder.embed_positions", # moss-music (generated, see generate_extra_tensors)
         ),
 
         MODEL_TENSOR.A_ENC_EMBD_NORM: (
@@ -1725,22 +1726,26 @@ class TensorNameMap:
         MODEL_TENSOR.A_POST_NORM: (
             "audio_tower.layer_norm", # ultravox
             "audio_tower.ln_post", # qwen2omni
+            "audio_encoder.layer_norm", # moss-music
         ),
 
         MODEL_TENSOR.A_ENC_ATTN_Q: (
             "audio_tower.layers.{bid}.self_attn.q_proj", # ultravox
+            "audio_encoder.layers.{bid}.self_attn.q_proj", # moss-music
             "conformer.layers.{bid}.self_attn.linear_q", # lfm2
             "conformer.layers.{bid}.attention.attn.q_proj", # gemma3n
         ),
 
         MODEL_TENSOR.A_ENC_ATTN_K: (
             "audio_tower.layers.{bid}.self_attn.k_proj", # ultravox
+            "audio_encoder.layers.{bid}.self_attn.k_proj", # moss-music
             "conformer.layers.{bid}.self_attn.linear_k", # lfm2
             "conformer.layers.{bid}.attention.attn.k_proj", # gemma3n
         ),
 
         MODEL_TENSOR.A_ENC_ATTN_V: (
             "audio_tower.layers.{bid}.self_attn.v_proj", # ultravox
+            "audio_encoder.layers.{bid}.self_attn.v_proj", # moss-music
             "conformer.layers.{bid}.self_attn.linear_v", # lfm2
             "conformer.layers.{bid}.attention.attn.v_proj", # gemma3n
         ),
@@ -1755,18 +1760,21 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_INPUT_NORM: (
             "audio_tower.layers.{bid}.self_attn_layer_norm", # ultravox
+            "audio_encoder.layers.{bid}.self_attn_layer_norm", # moss-music
             "conformer.layers.{bid}.norm_self_att", # lfm2
             "conformer.layers.{bid}.attention.pre_attn_norm", # gemma3n
         ),
 
         MODEL_TENSOR.A_ENC_OUTPUT: (
             "audio_tower.layers.{bid}.self_attn.out_proj", # ultravox
+            "audio_encoder.layers.{bid}.self_attn.out_proj", # moss-music
             "conformer.layers.{bid}.self_attn.linear_out", # lfm2
             "conformer.layers.{bid}.attention.post", # gemma3n
         ),
 
         MODEL_TENSOR.A_ENC_OUTPUT_NORM: (
             "audio_tower.layers.{bid}.final_layer_norm", # ultravox
+            "audio_encoder.layers.{bid}.final_layer_norm", # moss-music
             "conformer.layers.{bid}.norm_out", # lfm2
             "conformer.layers.{bid}.attention.post_norm", # gemma3n
         ),
@@ -1786,6 +1794,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_FFN_UP: (
             "audio_tower.layers.{bid}.fc1", # ultravox
+            "audio_encoder.layers.{bid}.fc1", # moss-music
             "conformer.layers.{bid}.feed_forward1.linear1", # lfm2
             "conformer.layers.{bid}.ffw_layer_start.ffw_layer_1", # gemma3n
         ),
@@ -1794,6 +1803,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_FFN_DOWN: (
             "audio_tower.layers.{bid}.fc2", # ultravox
+            "audio_encoder.layers.{bid}.fc2", # moss-music
             "conformer.layers.{bid}.feed_forward1.linear2", # lfm2
             "conformer.layers.{bid}.ffw_layer_start.ffw_layer_2", # gemma3n
         ),
@@ -1896,6 +1906,40 @@ class TensorNameMap:
         ),
         MODEL_TENSOR.A_MM_SOFT_EMB_NORM: (
             "model.embed_audio.soft_embedding_norm", # gemma3n
+        ),
+
+        # moss-music audio: Conv2d stem + GatedMLP projectors
+
+        MODEL_TENSOR.A_ENC_CONV2D: (
+            "audio_encoder.conv{bid}", # moss-music
+        ),
+
+        MODEL_TENSOR.A_ENC_STEM_PROJ: (
+            "audio_encoder.stem_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_MMPROJ_GATE: (
+            "audio_adapter.gate_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_MMPROJ_UP: (
+            "audio_adapter.up_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_MMPROJ_DOWN: (
+            "audio_adapter.down_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_DEEPSTACK_GATE: (
+            "deepstack_audio_merger_list.{bid}.gate_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_DEEPSTACK_UP: (
+            "deepstack_audio_merger_list.{bid}.up_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_DEEPSTACK_DOWN: (
+            "deepstack_audio_merger_list.{bid}.down_proj", # moss-music
         ),
 
         # NextN/MTP tensors

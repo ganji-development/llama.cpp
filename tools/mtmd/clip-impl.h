@@ -60,6 +60,12 @@
 #define KEY_AUDIO_PROJ_TYPE     "clip.audio.projector_type" // for models with mixed modalities
 #define KEY_A_NUM_MEL_BINS      "clip.audio.num_mel_bins"
 #define KEY_A_PROJ_STACK_FACTOR "clip.audio.projector.stack_factor"
+// moss-music
+#define KEY_A_DOWNSAMPLE_RATE   "clip.audio.downsample_rate"
+#define KEY_A_NUM_CONV2D_LAYERS "clip.audio.num_conv2d_layers"
+#define KEY_A_ADAPTER_HIDDEN    "clip.audio.adapter_hidden_size"
+#define KEY_A_DEEPSTACK_INJECT  "clip.audio.deepstack_num_inject"
+#define KEY_A_DEEPSTACK_IDXS    "clip.audio.deepstack_layer_indexes"
 
 
 //
@@ -132,6 +138,16 @@
 #define TN_MM_AUDIO_FC  "mm.a.fc.%s" // fully connected layer
 #define TN_MM_NORM_PRE  "mm.a.norm_pre.%s"
 #define TN_MM_NORM_MID  "mm.a.norm_mid.%s"
+
+// moss-music (audio): Conv2d stem + GatedMLP adapter + DeepStack mergers
+#define TN_A_CONV2D        "a.conv2d.%d.%s"
+#define TN_A_STEM_PROJ     "a.stem_proj.%s"
+#define TN_MM_A_GATE       "mm.a.gate.%s"
+#define TN_MM_A_UP         "mm.a.up.%s"
+#define TN_MM_A_DOWN       "mm.a.down.%s"
+#define TN_MM_A_DS_GATE    "mm.a.deepstack.%d.gate.%s"
+#define TN_MM_A_DS_UP      "mm.a.deepstack.%d.up.%s"
+#define TN_MM_A_DS_DOWN    "mm.a.deepstack.%d.down.%s"
 
 // cogvlm
 #define TN_MM_POST_FC_NORM "mm.post_fc_norm.%s"
@@ -239,6 +255,7 @@ enum projector_type {
     PROJECTOR_TYPE_YOUTUVL,
     PROJECTOR_TYPE_KIMIK25,
     PROJECTOR_TYPE_NEMOTRON_V2_VL,
+    PROJECTOR_TYPE_MOSS_MUSIC,
     PROJECTOR_TYPE_UNKNOWN,
 };
 
@@ -276,6 +293,7 @@ static std::map<projector_type, std::string> PROJECTOR_TYPE_NAMES = {
     { PROJECTOR_TYPE_YOUTUVL,   "youtuvl"},
     { PROJECTOR_TYPE_KIMIK25,   "kimik25"},
     { PROJECTOR_TYPE_NEMOTRON_V2_VL, "nemotron_v2_vl"},
+    { PROJECTOR_TYPE_MOSS_MUSIC, "moss_music"},
 };
 
 static projector_type clip_projector_type_from_string(const std::string & str) {

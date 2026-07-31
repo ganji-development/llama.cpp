@@ -356,6 +356,9 @@ struct mtmd_context {
             case PROJECTOR_TYPE_LFM2A:
                 audio_preproc = std::make_unique<mtmd_audio_preprocessor_conformer>(ctx_a);
                 break;
+            case PROJECTOR_TYPE_MOSS_MUSIC:
+                audio_preproc = std::make_unique<mtmd_audio_preprocessor_moss>(ctx_a);
+                break;
             default:
                 GGML_ABORT("unsupported audio projector type");
         }
@@ -376,6 +379,13 @@ struct mtmd_context {
         } else if (proj == PROJECTOR_TYPE_MUSIC_FLAMINGO) {
             // <sound> ... (embeddings) ...
             aud_beg = "<sound>";
+
+        } else if (proj == PROJECTOR_TYPE_MOSS_MUSIC) {
+            // <|audio_bos|> ... (embeddings) ... <|audio_eos|>
+            // note: MOSS reuses <|system|>/<|user|> ids for these, see
+            // audio_start_id/audio_end_id in processing_moss_music.py
+            aud_beg = "<|audio_bos|>";
+            aud_end = "<|audio_eos|>";
         }
     }
 

@@ -295,7 +295,8 @@ ggml_tensor * clip_graph::build_vit(
             norm_type norm_t,
             ffn_op_type ffn_t,
             ggml_tensor * learned_pos_embd,
-            std::function<ggml_tensor *(ggml_tensor *, const clip_layer &)> add_pos
+            std::function<ggml_tensor *(ggml_tensor *, const clip_layer &)> add_pos,
+            std::vector<ggml_tensor *> * layers_out
         ) {
     if (learned_pos_embd) {
         inp = ggml_add(ctx0, inp, learned_pos_embd);
@@ -439,6 +440,10 @@ ggml_tensor * clip_graph::build_vit(
         // residual 2
         cur = ggml_add(ctx0, inpL, cur);
         cb(cur, "layer_out", il);
+
+        if (layers_out) {
+            layers_out->push_back(cur);
+        }
 
         inpL = cur;
     }
@@ -870,6 +875,10 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
             {
                 builder = std::make_unique<clip_graph_conformer>(ctx, img);
             } break;
+        case PROJECTOR_TYPE_MOSS_MUSIC:
+            {
+                builder = std::make_unique<clip_graph_moss_music>(ctx, img);
+            } break;
         case PROJECTOR_TYPE_GLM4V:
             {
                 builder = std::make_unique<clip_graph_glm4v>(ctx, img);
@@ -1267,6 +1276,35 @@ struct clip_model_loader {
 
                         // audio preprocessing params
                         hparams.audio_chunk_len    = 30; // in seconds
+                        hparams.audio_sample_rate  = 16000;
+                        hparams.audio_n_fft        = 400;
+                        hparams.audio_window_len   = 400;
+                        hparams.audio_hop_len      = 160;
+                    } break;
+                case PROJECTOR_TYPE_MOSS_MUSIC:
+                    {
+                        hparams.ffn_op = FFN_GELU_ERF;
+                        log_ffn_op = "gelu_erf"; // temporary solution for logging
+
+                        get_u32(KEY_A_DOWNSAMPLE_RATE,  hparams.audio_downsample_rate, false);
+                        get_u32(KEY_A_DEEPSTACK_INJECT, hparams.n_deepstack_audio,     false);
+                        get_arr_int(KEY_A_DEEPSTACK_IDXS, hparams.deepstack_layer_indexes, false);
+
+                        if (hparams.audio_downsample_rate == 0) {
+                            hparams.audio_downsample_rate = 8; // 3x conv2d stride 2
+                        }
+
+                        if ((int) hparams.deepstack_layer_indexes.size() < hparams.n_deepstack_audio) {
+                            throw std::runtime_error(string_format(
+                                "%s: deepstack_num_inject (%d) exceeds the number of deepstack_layer_indexes (%d)\n",
+                                __func__, hparams.n_deepstack_audio, (int) hparams.deepstack_layer_indexes.size()));
+                        }
+                        hparams.deepstack_layer_indexes.resize(hparams.n_deepstack_audio);
+
+                        // mel params match whisper exactly (n_fft 400, hop 160, 16 kHz);
+                        // chunk_len is the encoder's own limit: max_source_positions
+                        // (1500) tokens * downsample 8 / 100 frames-per-second = 120 s
+                        hparams.audio_chunk_len    = 120; // in seconds
                         hparams.audio_sample_rate  = 16000;
                         hparams.audio_n_fft        = 400;
                         hparams.audio_window_len   = 400;
@@ -1813,6 +1851,32 @@ struct clip_model_loader {
                     model.mm_0_w = get_tensor(string_format(TN_MVLM_PROJ_MLP, 0, "weight"));
                     model.mm_1_w = get_tensor(string_format(TN_MVLM_PROJ_MLP, 1, "weight"));
                     model.mm_3_w = get_tensor(string_format(TN_MVLM_PROJ_MLP, 3, "weight"));
+                } break;
+            case PROJECTOR_TYPE_MOSS_MUSIC:
+                {
+                    // conv2d stem is 1-indexed in the GGUF (a.conv2d.{1,2,3})
+                    for (size_t i = 0; i < model.conv2d_w.size(); ++i) {
+                        model.conv2d_w[i] = get_tensor(string_format(TN_A_CONV2D, (int) i + 1, "weight"));
+                        model.conv2d_b[i] = get_tensor(string_format(TN_A_CONV2D, (int) i + 1, "bias"));
+                    }
+                    model.stem_proj_w = get_tensor(string_format(TN_A_STEM_PROJ, "weight"));
+                    model.stem_proj_b = get_tensor(string_format(TN_A_STEM_PROJ, "bias"));
+
+                    // main audio adapter (GatedMLP, no biases)
+                    model.mm_ffn_gate_w = get_tensor(string_format(TN_MM_A_GATE, "weight"));
+                    model.mm_ffn_up_w   = get_tensor(string_format(TN_MM_A_UP,   "weight"));
+                    model.mm_ffn_down_w = get_tensor(string_format(TN_MM_A_DOWN, "weight"));
+
+                    // deepstack mergers, one GatedMLP each
+                    const int n_ds = hparams.n_deepstack_audio;
+                    model.ds_gate_w.resize(n_ds);
+                    model.ds_up_w.resize(n_ds);
+                    model.ds_down_w.resize(n_ds);
+                    for (int i = 0; i < n_ds; ++i) {
+                        model.ds_gate_w[i] = get_tensor(string_format(TN_MM_A_DS_GATE, i, "weight"));
+                        model.ds_up_w[i]   = get_tensor(string_format(TN_MM_A_DS_UP,   i, "weight"));
+                        model.ds_down_w[i] = get_tensor(string_format(TN_MM_A_DS_DOWN, i, "weight"));
+                    }
                 } break;
             case PROJECTOR_TYPE_GLMA:
                 {
@@ -3538,6 +3602,12 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
             {
                 n_patches = ((((img->nx + 1) / 2) + 1) / 2 + 1) / 2;
             } break;
+        case PROJECTOR_TYPE_MOSS_MUSIC:
+            {
+                // 3x conv2d kernel 3 stride 2 pad 1 -> ceil(n/2) each time.
+                // matches _conv3_downsample_len in processing_moss_music.py
+                n_patches = ((((img->nx + 1) / 2) + 1) / 2 + 1) / 2;
+            } break;
         default:
             GGML_ABORT("unsupported projector type");
     }
@@ -3902,6 +3972,7 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
         case PROJECTOR_TYPE_LFM2:
         case PROJECTOR_TYPE_VOXTRAL:
         case PROJECTOR_TYPE_MUSIC_FLAMINGO:
+        case PROJECTOR_TYPE_MOSS_MUSIC:
         case PROJECTOR_TYPE_JANUS_PRO:
         case PROJECTOR_TYPE_PHI4:
         case PROJECTOR_TYPE_COGVLM:
@@ -3982,6 +4053,27 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
         ggml_backend_tensor_get(embeddings, vec, 0, ggml_nbytes(embeddings));
     }
 
+    // Debug: dump the raw projector output to a file for numeric parity testing
+    // (MTMD_DEBUG_EMBD_FILE=path). Layout: int32 n_embd, int32 n_tokens, then
+    // n_embd*n_tokens little-endian floats.
+    if (const char * dump_path = std::getenv("MTMD_DEBUG_EMBD_FILE")) {
+        const int32_t n_embd_d   = (int32_t) embeddings->ne[0];
+        const int32_t n_tokens_d = (int32_t) embeddings->ne[1];
+        std::vector<float> emb_data((size_t) n_embd_d * n_tokens_d);
+        ggml_backend_tensor_get(embeddings, emb_data.data(), 0, ggml_nbytes(embeddings));
+
+        std::ofstream f(dump_path, std::ios::binary);
+        if (f) {
+            f.write(reinterpret_cast<const char *>(&n_embd_d),   sizeof(n_embd_d));
+            f.write(reinterpret_cast<const char *>(&n_tokens_d), sizeof(n_tokens_d));
+            f.write(reinterpret_cast<const char *>(emb_data.data()),
+                    (std::streamsize) (emb_data.size() * sizeof(float)));
+            LOG_INF("%s: dumped [%d, %d] embeddings to %s\n", __func__, n_embd_d, n_tokens_d, dump_path);
+        } else {
+            LOG_ERR("%s: failed to open %s for writing\n", __func__, dump_path);
+        }
+    }
+
     // Debug: dump final embeddings if MTMD_DEBUG_EMBEDDINGS is set
     if (ctx->debug_output_embeddings) {
         const int64_t n_embd = embeddings->ne[0];
@@ -4051,6 +4143,9 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
         case PROJECTOR_TYPE_QWEN3VL:
             // main path + deepstack paths
             return ctx->model.mm_1_b->ne[0] * (1 + ctx->model.n_deepstack_layers);
+        case PROJECTOR_TYPE_MOSS_MUSIC:
+            // audio_adapter + deepstack mergers, concatenated on the feature axis
+            return ctx->model.mm_ffn_down_w->ne[1] * (1 + ctx->model.hparams.n_deepstack_audio);
         case PROJECTOR_TYPE_GEMMA3:
         case PROJECTOR_TYPE_GEMMA3NV:
             return ctx->model.mm_input_proj_w->ne[0];
@@ -4117,6 +4212,7 @@ bool clip_has_whisper_encoder(const struct clip_ctx * ctx) {
         case PROJECTOR_TYPE_GLMA:
         case PROJECTOR_TYPE_VOXTRAL:
         case PROJECTOR_TYPE_MUSIC_FLAMINGO:
+        case PROJECTOR_TYPE_MOSS_MUSIC:
             return true;
         default:
             return false;
