@@ -1047,7 +1047,6 @@ class MODEL_TENSOR(IntEnum):
     A_QF_FFN_DOWN          = auto()
     A_QF_FFN_NORM          = auto()
     # moss-music audio
-    A_ENC_CONV2D           = auto() # moss-music Conv2d stem layers
     A_ENC_STEM_PROJ        = auto() # moss-music stem linear projection
     A_MMPROJ_GATE          = auto() # moss-music GatedMLP gate_proj
     A_MMPROJ_UP            = auto() # moss-music GatedMLP up_proj
@@ -1223,6 +1222,7 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.POS_EMBD:                  "position_embd",
     MODEL_TENSOR.OUTPUT_NORM:               "output_norm",
     MODEL_TENSOR.OUTPUT:                    "output",
+    MODEL_TENSOR.OUTPUT_AUDIO:              "output_audio",
     MODEL_TENSOR.DENSE_2_OUT:               "dense_2", # embeddinggemma 2_Dense
     MODEL_TENSOR.DENSE_3_OUT:               "dense_3", # embeddinggemma 2_Dense
     MODEL_TENSOR.HC_HEAD_FN:                "output_hc_fn",
@@ -1653,7 +1653,6 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.A_QF_FFN_DOWN:             "a.proj_blk.{bid}.ffn_down",
     MODEL_TENSOR.A_QF_FFN_NORM:             "a.proj_blk.{bid}.ffn_norm",
     # moss-music audio
-    MODEL_TENSOR.A_ENC_CONV2D:              "a.conv2d.{bid}",
     MODEL_TENSOR.A_ENC_STEM_PROJ:           "a.stem_proj",
     MODEL_TENSOR.A_MMPROJ_GATE:             "mm.a.gate",
     MODEL_TENSOR.A_MMPROJ_UP:               "mm.a.up",
@@ -1891,7 +1890,6 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.A_QF_FFN_DOWN,
         MODEL_TENSOR.A_QF_FFN_NORM,
         # moss-music audio
-        MODEL_TENSOR.A_ENC_CONV2D,
         MODEL_TENSOR.A_ENC_STEM_PROJ,
         MODEL_TENSOR.A_MMPROJ_GATE,
         MODEL_TENSOR.A_MMPROJ_UP,
