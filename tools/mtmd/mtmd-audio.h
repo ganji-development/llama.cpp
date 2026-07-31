@@ -69,6 +69,17 @@ struct mtmd_audio_preprocessor_whisper : mtmd_audio_preprocessor {
     mtmd_audio_cache cache;
 };
 
+// moss-music: whisper mel params, but HF-style center/reflect padding with no
+// 30s silence pad, and chunked at the encoder's own limit rather than 30s
+struct mtmd_audio_preprocessor_moss : mtmd_audio_preprocessor {
+    mtmd_audio_preprocessor_moss(const clip_ctx * ctx) : mtmd_audio_preprocessor(ctx) {}
+    void initialize() override;
+    bool preprocess(const float * samples, size_t n_samples, std::vector<mtmd_audio_mel> & output) override;
+
+  private:
+    mtmd_audio_cache cache;
+};
+
 struct mtmd_audio_preprocessor_conformer : mtmd_audio_preprocessor {
     mtmd_audio_preprocessor_conformer(const clip_ctx * ctx) : mtmd_audio_preprocessor(ctx) {}
     void initialize() override;

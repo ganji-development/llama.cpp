@@ -105,6 +105,10 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
             return new llama_model_qwen2moe(params);
         case LLM_ARCH_QWEN3:
             return new llama_model_qwen3(params);
+        case LLM_ARCH_MOSS_MUSIC:
+            return new llama_model_moss_music(params);
+        case LLM_ARCH_MOSS_TTS_DELAY:
+            return new llama_model_moss_tts_delay(params);
         case LLM_ARCH_QWEN3MOE:
             return new llama_model_qwen3moe(params);
         case LLM_ARCH_QWEN3VL:
@@ -1701,6 +1705,14 @@ size_t llama_model::n_devices() const {
     return devices.size();
 }
 
+uint32_t llama_model::n_logits() const {
+    if (arch == LLM_ARCH_MOSS_TTS_DELAY) {
+        return vocab.n_tokens() + hparams.n_vq * (hparams.audio_vocab_size + 1);
+    }
+
+    return vocab.n_tokens();
+}
+
 const float * llama_model::tensor_split() const {
     return params.tensor_split;
 }
@@ -1935,6 +1947,13 @@ void llama_model::print_info() const {
             LLAMA_LOG_INFO("%s: expert_weights_norm   = %d\n",     __func__, hparams.expert_weights_norm);
             LLAMA_LOG_INFO("%s: expert_gating_func    = %s\n",     __func__, llama_expert_gating_func_name((llama_expert_gating_func_type) hparams.expert_gating_func));
             LLAMA_LOG_INFO("%s: n_layer_nextn         = %d\n",     __func__, hparams.n_layer_nextn);
+        }
+
+        if (arch == LLM_ARCH_MOSS_TTS_DELAY) {
+            LLAMA_LOG_INFO("%s: n_vq                  = %u\n",     __func__, hparams.n_vq);
+            LLAMA_LOG_INFO("%s: audio_vocab_size      = %u\n",     __func__, hparams.audio_vocab_size);
+            LLAMA_LOG_INFO("%s: audio_pad_code        = %u\n",     __func__, hparams.audio_pad_code);
+            LLAMA_LOG_INFO("%s: sampling_rate         = %u\n",     __func__, hparams.sampling_rate);
         }
 
         if (arch == LLM_ARCH_SMALLTHINKER || arch == LLM_ARCH_LFM2MOE) {
@@ -2567,6 +2586,8 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
         case LLM_ARCH_DREAM:
         case LLM_ARCH_QWEN2MOE:
         case LLM_ARCH_QWEN3:
+        case LLM_ARCH_MOSS_TTS_DELAY:
+        case LLM_ARCH_MOSS_MUSIC:
         case LLM_ARCH_QWEN3MOE:
         case LLM_ARCH_LLADA_MOE:
         case LLM_ARCH_RND1:

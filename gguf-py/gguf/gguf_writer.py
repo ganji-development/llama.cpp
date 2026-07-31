@@ -1398,6 +1398,21 @@ class GGUFWriter:
     def add_audio_projector_head_count(self, value: int) -> None:
         self.add_uint32(Keys.ClipAudio.Projector.HEAD_COUNT, value)
 
+    def add_audio_downsample_rate(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.DOWNSAMPLE_RATE, value)
+
+    def add_audio_num_conv2d_layers(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.NUM_CONV2D_LAYERS, value)
+
+    def add_audio_deepstack_layer_indexes(self, values: Sequence[int]) -> None:
+        self.add_array(Keys.ClipAudio.DEEPSTACK_LAYER_INDEXES, values)
+
+    def add_audio_deepstack_num_inject(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.DEEPSTACK_NUM_INJECT, value)
+
+    def add_audio_adapter_hidden_size(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.ADAPTER_HIDDEN_SIZE, value)
+
     def add_xielu_alpha_p(self, values: Sequence[float]):
         self.add_array(Keys.xIELU.ALPHA_P, values)
 

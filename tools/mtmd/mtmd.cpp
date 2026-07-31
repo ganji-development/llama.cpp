@@ -740,6 +740,14 @@ struct mtmd_context {
                     aud_end = "<|mimo_audio_end|>";
                     audio_preproc = std::make_unique<mtmd_audio_preprocessor_mimo_audio>(ctx_a);
                 } break;
+            case PROJECTOR_TYPE_MOSS_MUSIC:
+                {
+                    // note: MOSS reuses <|system|>/<|user|> ids for these, see
+                    // audio_start_id/audio_end_id in processing_moss_music.py
+                    aud_beg = "<|audio_bos|>";
+                    aud_end = "<|audio_eos|>";
+                    audio_preproc = std::make_unique<mtmd_audio_preprocessor_moss>(ctx_a);
+                } break;
             default:
                 throw std::runtime_error(string_format("%s: unexpected audio projector type %d\n", __func__, proj));
         }

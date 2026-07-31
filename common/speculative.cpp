@@ -633,6 +633,8 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
             llama_batch enc_batch = {
                 /*.n_tokens =*/ n_chunk,
                 /*.token    =*/ nullptr,
+                /*.n_token_audio =*/ 0,
+                /*.token_audio   =*/ nullptr,
                 /*.embd     =*/ features_buf.data() + (size_t) i * n_embd_enc,
                 /*.pos      =*/ nullptr,
                 /*.n_seq_id =*/ nullptr,
@@ -1085,6 +1087,8 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 llama_batch enc_batch = {
                     /*.n_tokens =*/ n_chunk,
                     /*.token    =*/ nullptr,
+                    /*.n_token_audio =*/ 0,
+                    /*.token_audio   =*/ nullptr,
                     /*.embd     =*/ features_buf.data(),
                     /*.pos      =*/ nullptr,
                     /*.n_seq_id =*/ nullptr,

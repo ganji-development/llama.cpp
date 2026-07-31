@@ -45,6 +45,9 @@ class TensorNameMap:
         MODEL_TENSOR.MASKED_EMBD_ORDERING: (
             "masked_embedding.token_ordering",           # gemma-4 E2B/E4B assistants
         ),
+        MODEL_TENSOR.TOKEN_EMBD_AUDIO: (
+            "token_embd_audio",                          # moss-tts-delay, indexed tensors emitted manually
+        ),
 
         # Token type embeddings
         MODEL_TENSOR.TOKEN_TYPES: (
@@ -89,6 +92,9 @@ class TensorNameMap:
             "lm_head",                   # llama4
             "model.transformer.ff_out",  # llada
             "head.decoder",              # modern-bert
+        ),
+        MODEL_TENSOR.OUTPUT_AUDIO: (
+            "output_audio",              # moss-tts-delay, indexed tensors emitted manually
         ),
         MODEL_TENSOR.DENSE_2_OUT: (
             "dense_2_out",  # embeddinggemma
@@ -2103,6 +2109,7 @@ class TensorNameMap:
         MODEL_TENSOR.A_ENC_EMBD_POS: (
             "audio_tower.embed_positions", # ultravox
             "audio_embedding.embedding", # lfm2
+            "audio_encoder.embed_positions", # moss-music (generated, see generate_extra_tensors)
         ),
 
         MODEL_TENSOR.A_ENC_EMBD_NORM: (
@@ -2145,10 +2152,12 @@ class TensorNameMap:
             "audio_tower.layer_norm", # ultravox
             "audio_tower.ln_post", # qwen2omni
             "encoder.layer_norm", # mimo-audio-tokenizer
+            "audio_encoder.layer_norm", # moss-music
         ),
 
         MODEL_TENSOR.A_ENC_ATTN_Q: (
             "audio_tower.layers.{bid}.self_attn.q_proj", # ultravox
+            "audio_encoder.layers.{bid}.self_attn.q_proj", # moss-music
             "conformer.layers.{bid}.self_attn.linear_q", # lfm2
             "conformer.layers.{bid}.attention.attn.q_proj", # gemma3n
             "conformer.layers.{bid}.self_attn.q_proj", # gemma4
@@ -2159,6 +2168,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_ATTN_K: (
             "audio_tower.layers.{bid}.self_attn.k_proj", # ultravox
+            "audio_encoder.layers.{bid}.self_attn.k_proj", # moss-music
             "conformer.layers.{bid}.self_attn.linear_k", # lfm2
             "conformer.layers.{bid}.attention.attn.k_proj", # gemma3n
             "conformer.layers.{bid}.self_attn.k_proj", # gemma4
@@ -2169,6 +2179,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_ATTN_V: (
             "audio_tower.layers.{bid}.self_attn.v_proj", # ultravox
+            "audio_encoder.layers.{bid}.self_attn.v_proj", # moss-music
             "conformer.layers.{bid}.self_attn.linear_v", # lfm2
             "conformer.layers.{bid}.attention.attn.v_proj", # gemma3n
             "conformer.layers.{bid}.self_attn.v_proj", # gemma4
@@ -2200,6 +2211,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_INPUT_NORM: (
             "audio_tower.layers.{bid}.self_attn_layer_norm", # ultravox
+            "audio_encoder.layers.{bid}.self_attn_layer_norm", # moss-music
             "conformer.layers.{bid}.norm_self_att", # lfm2
             "conformer.layers.{bid}.attention.pre_attn_norm", # gemma3n
             "sound_encoder.encoder.layers.{bid}.norm_self_att", # parakeet
@@ -2209,6 +2221,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_OUTPUT: (
             "audio_tower.layers.{bid}.self_attn.out_proj", # ultravox
+            "audio_encoder.layers.{bid}.self_attn.out_proj", # moss-music
             "conformer.layers.{bid}.self_attn.linear_out", # lfm2
             "conformer.layers.{bid}.attention.post", # gemma3n
             "conformer.layers.{bid}.self_attn.post", # gemma4
@@ -2219,6 +2232,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_OUTPUT_NORM: (
             "audio_tower.layers.{bid}.final_layer_norm", # ultravox
+            "audio_encoder.layers.{bid}.final_layer_norm", # moss-music
             "conformer.layers.{bid}.norm_out", # lfm2
             "conformer.layers.{bid}.attention.post_norm", # gemma3n
             "sound_encoder.encoder.layers.{bid}.norm_out", # parakeet
@@ -2245,6 +2259,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_FFN_UP: (
             "audio_tower.layers.{bid}.fc1", # ultravox
+            "audio_encoder.layers.{bid}.fc1", # moss-music
             "conformer.layers.{bid}.feed_forward1.linear1", # lfm2
             "conformer.layers.{bid}.ffw_layer_start.ffw_layer_1", # gemma3n
             "conformer.layers.{bid}.feed_forward1.ffw_layer_1", # gemma4
@@ -2257,6 +2272,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_ENC_FFN_DOWN: (
             "audio_tower.layers.{bid}.fc2", # ultravox
+            "audio_encoder.layers.{bid}.fc2", # moss-music
             "conformer.layers.{bid}.feed_forward1.linear2", # lfm2
             "conformer.layers.{bid}.ffw_layer_start.ffw_layer_2", # gemma3n
             "conformer.layers.{bid}.feed_forward1.ffw_layer_2", # gemma4
@@ -2521,6 +2537,40 @@ class TensorNameMap:
 
         MODEL_TENSOR.A_QF_FFN_NORM: (
             "projector.qformer.encoder.layer.{bid}.output_query.LayerNorm",
+        ),
+
+        # moss-music audio: Conv2d stem + GatedMLP projectors
+
+        MODEL_TENSOR.A_ENC_CONV2D: (
+            "audio_encoder.conv{bid}", # moss-music
+        ),
+
+        MODEL_TENSOR.A_ENC_STEM_PROJ: (
+            "audio_encoder.stem_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_MMPROJ_GATE: (
+            "audio_adapter.gate_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_MMPROJ_UP: (
+            "audio_adapter.up_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_MMPROJ_DOWN: (
+            "audio_adapter.down_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_DEEPSTACK_GATE: (
+            "deepstack_audio_merger_list.{bid}.gate_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_DEEPSTACK_UP: (
+            "deepstack_audio_merger_list.{bid}.up_proj", # moss-music
+        ),
+
+        MODEL_TENSOR.A_DEEPSTACK_DOWN: (
+            "deepstack_audio_merger_list.{bid}.down_proj", # moss-music
         ),
 
         # NextN/MTP tensors

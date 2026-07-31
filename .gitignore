@@ -153,3 +153,7 @@ a.out.*
 
 AGENTS.local.md
 .pi/SYSTEM.md
+
+# local dependency downloads and scratch CMake probes (not source)
+.deps/
+openssl-probe/

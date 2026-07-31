@@ -561,6 +561,7 @@ struct llama_model {
     std::vector<std::string> classifier_labels;
 
     struct ggml_tensor * tok_embd   = nullptr;
+    std::vector<struct ggml_tensor *> tok_embd_audio;
     struct ggml_tensor * type_embd  = nullptr;
     struct ggml_tensor * pos_embd   = nullptr;
     struct ggml_tensor * tok_norm   = nullptr;
@@ -569,6 +570,7 @@ struct llama_model {
     struct ggml_tensor * output_norm     = nullptr;
     struct ggml_tensor * output_norm_b   = nullptr;
     struct ggml_tensor * output          = nullptr;
+    std::vector<struct ggml_tensor *> output_audio;
     struct ggml_tensor * output_b        = nullptr;
     struct ggml_tensor * output_norm_enc = nullptr;
 
@@ -657,6 +659,7 @@ struct llama_model {
     size_t n_tensors() const;
     size_t n_devices() const;
     const float * tensor_split() const;
+    uint32_t n_logits() const;
 
     uint32_t n_gpu_layers() const;
     llama_split_mode split_mode() const;

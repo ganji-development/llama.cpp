@@ -192,6 +192,19 @@ if (WIN32)
                         "${dll}" "$<TARGET_FILE_DIR:ggml-hip>")
         endforeach()
         message(STATUS "ggml-hip: staging HIP runtime from ${GGML_HIP_RUNTIME_DIRS}")
+
+        # rocblas.dll resolves its Tensile kernels relative to the loading
+        # executable, not to itself, so the data has to sit beside every binary
+        # or rocBLAS aborts the process on first gemm with 0xC0000409.
+        foreach (dir IN LISTS GGML_HIP_RUNTIME_DIRS)
+            if (EXISTS "${dir}/rocblas/library")
+                add_custom_command(TARGET ggml-hip POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory
+                            "${dir}/rocblas/library"
+                            "$<TARGET_FILE_DIR:ggml-hip>/rocblas/library")
+                break()
+            endif()
+        endforeach()
     else()
         message(WARNING
             "ggml-hip: no HIP runtime DLLs found to stage; the process will bind "

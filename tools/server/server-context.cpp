@@ -147,6 +147,8 @@ struct server_batch {
         llama_batch view = {
             n_tokens,
             batch.token    + off,
+            0,
+            nullptr,
             nullptr,
             batch.pos      + off,
             batch.n_seq_id + off,
@@ -810,6 +812,8 @@ struct server_slot {
 
             llama_batch batch_view = {
                 n_tok_batch,
+                nullptr,
+                0,
                 nullptr,
                 const_cast<float *>(embd) + pos_offset * n_embd_dim,
                 pos.data() + pos_offset,

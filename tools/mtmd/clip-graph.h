@@ -19,6 +19,9 @@ struct build_vit_opts {
     // hook at layer output embeddings
     std::function<void(ggml_tensor * cur, int il)> callback_layer_out = nullptr;
 
+    // hook after the second residual add, i.e. the layer's final hidden states
+    std::function<void(ggml_tensor * cur, int il)> callback_layer_post = nullptr;
+
     // whether to skip the automatic post-layernorm (model.post_ln_w) applied at the end
     bool skip_post_ln = false;
 };
@@ -83,6 +86,8 @@ struct clip_graph {
     // build vision transformer (ViT) cgraph
     // this function should cover most of the models
     // if your model has specific features, you should probably duplicate this function
+    // to collect every encoder layer's output (as moss-music does to feed its
+    // DeepStack mergers), set opts.callback_layer_out
     ggml_tensor * build_vit(
                 ggml_tensor * inp,
                 int64_t n_pos,

@@ -86,6 +86,8 @@ int llama_batched_bench(int argc, char ** argv) {
             llama_batch batch_view = {
                 n_tokens,
                 batch.token    + i,
+                0,
+                nullptr,
                 nullptr,
                 batch.pos      + i,
                 batch.n_seq_id + i,

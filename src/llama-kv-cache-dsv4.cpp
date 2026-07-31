@@ -157,6 +157,8 @@ static llama_ubatch dsv4_build_raw_write_ubatch(const llama_ubatch & ubatch) {
         /*.n_seqs_unq   =*/ ubatch.n_seqs_unq,
         /*.n_pos        =*/ ubatch.n_pos,
         /*.token        =*/ data->token.empty() ? nullptr : data->token.data(),
+        /*.n_token_audio =*/ 0,
+        /*.token_audio  =*/ nullptr,
         /*.embd         =*/ nullptr,
         /*.pos          =*/ data->pos.data(),
         /*.n_seq_id     =*/ data->n_seq_id.data(),

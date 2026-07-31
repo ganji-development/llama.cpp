@@ -119,6 +119,11 @@ struct clip_hparams {
     int32_t audio_proj_downsample_rate = 0;
     int32_t audio_proj_head_count      = 0;
 
+    // moss-music
+    int32_t audio_downsample_rate = 0; // total conv2d stem downsampling (8 = 2^3)
+    int32_t n_deepstack_audio     = 0; // deepstack mergers injected into the LLM
+    std::vector<int32_t> deepstack_layer_indexes; // encoder layers feeding them
+
     // audio-to-mel preprocessor params
     int32_t audio_chunk_len   = -1; // in seconds
     int32_t audio_sample_rate = -1;
@@ -610,6 +615,15 @@ struct clip_model {
     // deepseek-ocr-2
     ggml_tensor * resample_query_768 = nullptr;
     ggml_tensor * resample_query_1024 = nullptr;
+    // moss-music audio: 3x Conv2d stem, stem projection, and the DeepStack
+    // mergers (the main adapter reuses mm_ffn_{gate,up,down}_w)
+    std::array<ggml_tensor *, 3> conv2d_w = {nullptr};
+    std::array<ggml_tensor *, 3> conv2d_b = {nullptr};
+    ggml_tensor * stem_proj_w = nullptr;
+    ggml_tensor * stem_proj_b = nullptr;
+    std::vector<ggml_tensor *> ds_gate_w;
+    std::vector<ggml_tensor *> ds_up_w;
+    std::vector<ggml_tensor *> ds_down_w;
 
     // lfm2 audio
     std::array<ggml_tensor *, 7> pre_encode_conv_X_w = {nullptr};

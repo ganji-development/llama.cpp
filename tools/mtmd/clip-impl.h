@@ -89,6 +89,12 @@
 #define KEY_A_LOCAL_BLOCK_COUNT    "clip.audio.local_block_count"    // mimo-v2.5: input_local_transformer layer count
 #define KEY_A_LOCAL_GROUP_SIZE     "clip.audio.local_group_size"     // mimo-v2.5: input_local_transformer grouping size
 #define KEY_AUDIO_SUBSAMPLING_FACTOR "clip.audio.subsampling_factor"
+// moss-music
+#define KEY_A_DOWNSAMPLE_RATE      "clip.audio.downsample_rate"
+#define KEY_A_NUM_CONV2D_LAYERS    "clip.audio.num_conv2d_layers"
+#define KEY_A_ADAPTER_HIDDEN       "clip.audio.adapter_hidden_size"
+#define KEY_A_DEEPSTACK_INJECT     "clip.audio.deepstack_num_inject"
+#define KEY_A_DEEPSTACK_IDXS       "clip.audio.deepstack_layer_indexes"
 
 //
 // tensor name constants
@@ -199,6 +205,15 @@
 #define TN_MM_A_LOCAL_LN1      "mm.a.local_blk.%d.ln1.%s"
 #define TN_MM_A_LOCAL_LN2      "mm.a.local_blk.%d.ln2.%s"
 #define TN_MM_A_LOCAL_NORM     "mm.a.local_norm.%s"
+// moss-music (audio): Conv2d stem + GatedMLP adapter + DeepStack mergers
+#define TN_A_CONV2D        "a.conv2d.%d.%s"
+#define TN_A_STEM_PROJ     "a.stem_proj.%s"
+#define TN_MM_A_GATE       "mm.a.gate.%s"
+#define TN_MM_A_UP         "mm.a.up.%s"
+#define TN_MM_A_DOWN       "mm.a.down.%s"
+#define TN_MM_A_DS_GATE    "mm.a.deepstack.%d.gate.%s"
+#define TN_MM_A_DS_UP      "mm.a.deepstack.%d.up.%s"
+#define TN_MM_A_DS_DOWN    "mm.a.deepstack.%d.down.%s"
 
 // cogvlm
 #define TN_MM_POST_FC_NORM "mm.post_fc_norm.%s"
@@ -407,6 +422,7 @@ enum projector_type {
     PROJECTOR_TYPE_MINIMAX_M3,
     PROJECTOR_TYPE_GRANITE4_VISION,
     PROJECTOR_TYPE_MIMO_AUDIO,
+    PROJECTOR_TYPE_MOSS_MUSIC,
     PROJECTOR_TYPE_UNKNOWN,
 };
 
@@ -464,6 +480,7 @@ static std::map<projector_type, std::string> PROJECTOR_TYPE_NAMES = {
     { PROJECTOR_TYPE_GRANITE4_VISION,   "granite4_vision"},
     { PROJECTOR_TYPE_MIMO_AUDIO,        "mimo_audio"},
     { PROJECTOR_TYPE_PARAKEET,          "parakeet"},
+    { PROJECTOR_TYPE_MOSS_MUSIC,        "moss_music"},
 };
 
 static projector_type clip_projector_type_from_string(const std::string & str) {

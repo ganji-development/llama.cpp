@@ -105,6 +105,15 @@ class Keys:
         CONTEXT_LENGTH                    = "{arch}.context_length"
         EMBEDDING_LENGTH                  = "{arch}.embedding_length"
         EMBEDDING_LENGTH_OUT              = "{arch}.embedding_length_out"
+        N_VQ                              = "{arch}.n_vq"
+        AUDIO_VOCAB_SIZE                  = "{arch}.audio_vocab_size"
+        AUDIO_PAD_CODE                    = "{arch}.audio_pad_code"
+        AUDIO_START_TOKEN_ID              = "{arch}.audio_start_token_id"
+        AUDIO_END_TOKEN_ID                = "{arch}.audio_end_token_id"
+        AUDIO_USER_SLOT_TOKEN_ID          = "{arch}.audio_user_slot_token_id"
+        AUDIO_ASSISTANT_GEN_SLOT_TOKEN_ID = "{arch}.audio_assistant_gen_slot_token_id"
+        AUDIO_ASSISTANT_DELAY_SLOT_TOKEN_ID = "{arch}.audio_assistant_delay_slot_token_id"
+        SAMPLING_RATE                     = "{arch}.sampling_rate"
         FEATURES_LENGTH                   = "{arch}.features_length"
         BLOCK_COUNT                       = "{arch}.block_count"
         LEADING_DENSE_BLOCK_COUNT         = "{arch}.leading_dense_block_count"
@@ -384,6 +393,11 @@ class Keys:
         WINDOW_SIZE         = "clip.audio.window_size"
         LOCAL_BLOCK_COUNT   = "clip.audio.local_block_count" # mimo-v2.5: input_local_transformer layer count
         LOCAL_GROUP_SIZE    = "clip.audio.local_group_size"  # mimo-v2.5: input_local_transformer grouping size
+        DOWNSAMPLE_RATE     = "clip.audio.downsample_rate"          # moss-music
+        NUM_CONV2D_LAYERS   = "clip.audio.num_conv2d_layers"        # moss-music
+        DEEPSTACK_LAYER_INDEXES = "clip.audio.deepstack_layer_indexes" # moss-music
+        DEEPSTACK_NUM_INJECT = "clip.audio.deepstack_num_inject"    # moss-music
+        ADAPTER_HIDDEN_SIZE = "clip.audio.adapter_hidden_size"      # moss-music
 
         class Attention:
             HEAD_COUNT      = "clip.audio.attention.head_count"
@@ -447,6 +461,8 @@ class MODEL_ARCH(IntEnum):
     QWEN2MOE         = auto()
     QWEN2VL          = auto()
     QWEN3            = auto()
+    MOSS_TTS_DELAY   = auto()
+    MOSS_MUSIC       = auto()
     QWEN3MOE         = auto()
     QWEN3NEXT        = auto()
     QWEN3VL          = auto()
@@ -575,12 +591,14 @@ class VISION_PROJECTOR_TYPE(IntEnum):
 
 class MODEL_TENSOR(IntEnum):
     TOKEN_EMBD           = auto()
+    TOKEN_EMBD_AUDIO     = auto() # moss-tts-delay, indexed as token_embd_audio.{id}
     TOKEN_EMBD_NORM      = auto()
     MASKED_EMBD_CENTROIDS= auto()
     MASKED_EMBD_ORDERING = auto()
     TOKEN_TYPES          = auto()
     POS_EMBD             = auto()
     OUTPUT               = auto()
+    OUTPUT_AUDIO         = auto() # moss-tts-delay, indexed as output_audio.{id}
     DENSE_2_OUT          = auto() # embeddinggemma 2_Dense
     DENSE_3_OUT          = auto() # embeddinggemma 3_Dense
     OUTPUT_NORM          = auto()
@@ -1028,6 +1046,15 @@ class MODEL_TENSOR(IntEnum):
     A_QF_FFN_UP            = auto()
     A_QF_FFN_DOWN          = auto()
     A_QF_FFN_NORM          = auto()
+    # moss-music audio
+    A_ENC_CONV2D           = auto() # moss-music Conv2d stem layers
+    A_ENC_STEM_PROJ        = auto() # moss-music stem linear projection
+    A_MMPROJ_GATE          = auto() # moss-music GatedMLP gate_proj
+    A_MMPROJ_UP            = auto() # moss-music GatedMLP up_proj
+    A_MMPROJ_DOWN          = auto() # moss-music GatedMLP down_proj
+    A_DEEPSTACK_GATE       = auto() # moss-music deepstack merger gate_proj
+    A_DEEPSTACK_UP         = auto() # moss-music deepstack merger up_proj
+    A_DEEPSTACK_DOWN       = auto() # moss-music deepstack merger down_proj
 
 
 MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
@@ -1059,6 +1086,8 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
     MODEL_ARCH.QWEN2MOE:         "qwen2moe",
     MODEL_ARCH.QWEN2VL:          "qwen2vl",
     MODEL_ARCH.QWEN3:            "qwen3",
+    MODEL_ARCH.MOSS_TTS_DELAY:   "moss-tts-delay",
+    MODEL_ARCH.MOSS_MUSIC:       "moss-music",
     MODEL_ARCH.QWEN3MOE:         "qwen3moe",
     MODEL_ARCH.QWEN3NEXT:        "qwen3next",
     MODEL_ARCH.QWEN3VL:          "qwen3vl",
@@ -1186,6 +1215,7 @@ VISION_PROJECTOR_TYPE_NAMES: dict[VISION_PROJECTOR_TYPE, str] = {
 
 TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.TOKEN_EMBD:                "token_embd",
+    MODEL_TENSOR.TOKEN_EMBD_AUDIO:          "token_embd_audio",
     MODEL_TENSOR.TOKEN_EMBD_NORM:           "token_embd_norm",
     MODEL_TENSOR.TOKEN_TYPES:               "token_types",
     MODEL_TENSOR.MASKED_EMBD_CENTROIDS:     "masked_embd_centroids",
@@ -1622,6 +1652,15 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.A_QF_FFN_UP:               "a.proj_blk.{bid}.ffn_up",
     MODEL_TENSOR.A_QF_FFN_DOWN:             "a.proj_blk.{bid}.ffn_down",
     MODEL_TENSOR.A_QF_FFN_NORM:             "a.proj_blk.{bid}.ffn_norm",
+    # moss-music audio
+    MODEL_TENSOR.A_ENC_CONV2D:              "a.conv2d.{bid}",
+    MODEL_TENSOR.A_ENC_STEM_PROJ:           "a.stem_proj",
+    MODEL_TENSOR.A_MMPROJ_GATE:             "mm.a.gate",
+    MODEL_TENSOR.A_MMPROJ_UP:               "mm.a.up",
+    MODEL_TENSOR.A_MMPROJ_DOWN:             "mm.a.down",
+    MODEL_TENSOR.A_DEEPSTACK_GATE:          "mm.a.deepstack.{bid}.gate",
+    MODEL_TENSOR.A_DEEPSTACK_UP:            "mm.a.deepstack.{bid}.up",
+    MODEL_TENSOR.A_DEEPSTACK_DOWN:          "mm.a.deepstack.{bid}.down",
     # NextN/MTP
     MODEL_TENSOR.NEXTN_PROJ_PRE:            "nextn.pre_projection",
     MODEL_TENSOR.NEXTN_PROJ_POST:           "nextn.post_projection",
@@ -1851,6 +1890,15 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.A_QF_FFN_UP,
         MODEL_TENSOR.A_QF_FFN_DOWN,
         MODEL_TENSOR.A_QF_FFN_NORM,
+        # moss-music audio
+        MODEL_TENSOR.A_ENC_CONV2D,
+        MODEL_TENSOR.A_ENC_STEM_PROJ,
+        MODEL_TENSOR.A_MMPROJ_GATE,
+        MODEL_TENSOR.A_MMPROJ_UP,
+        MODEL_TENSOR.A_MMPROJ_DOWN,
+        MODEL_TENSOR.A_DEEPSTACK_GATE,
+        MODEL_TENSOR.A_DEEPSTACK_UP,
+        MODEL_TENSOR.A_DEEPSTACK_DOWN,
     ],
     MODEL_ARCH.LLAMA: [
         MODEL_TENSOR.TOKEN_EMBD,
@@ -2268,6 +2316,42 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.FFN_UP_SHEXP,
     ],
     MODEL_ARCH.QWEN3: [
+        MODEL_TENSOR.TOKEN_EMBD,
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.OUTPUT,
+        MODEL_TENSOR.ROPE_FREQS,
+        MODEL_TENSOR.ATTN_NORM,
+        MODEL_TENSOR.ATTN_Q,
+        MODEL_TENSOR.ATTN_Q_NORM,
+        MODEL_TENSOR.ATTN_K,
+        MODEL_TENSOR.ATTN_K_NORM,
+        MODEL_TENSOR.ATTN_V,
+        MODEL_TENSOR.ATTN_OUT,
+        MODEL_TENSOR.FFN_NORM,
+        MODEL_TENSOR.FFN_GATE,
+        MODEL_TENSOR.FFN_DOWN,
+        MODEL_TENSOR.FFN_UP,
+    ],
+    MODEL_ARCH.MOSS_TTS_DELAY: [
+        MODEL_TENSOR.TOKEN_EMBD,
+        MODEL_TENSOR.TOKEN_EMBD_AUDIO,
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.OUTPUT,
+        MODEL_TENSOR.OUTPUT_AUDIO,
+        MODEL_TENSOR.ROPE_FREQS,
+        MODEL_TENSOR.ATTN_NORM,
+        MODEL_TENSOR.ATTN_Q,
+        MODEL_TENSOR.ATTN_Q_NORM,
+        MODEL_TENSOR.ATTN_K,
+        MODEL_TENSOR.ATTN_K_NORM,
+        MODEL_TENSOR.ATTN_V,
+        MODEL_TENSOR.ATTN_OUT,
+        MODEL_TENSOR.FFN_NORM,
+        MODEL_TENSOR.FFN_GATE,
+        MODEL_TENSOR.FFN_DOWN,
+        MODEL_TENSOR.FFN_UP,
+    ],
+    MODEL_ARCH.MOSS_MUSIC: [
         MODEL_TENSOR.TOKEN_EMBD,
         MODEL_TENSOR.OUTPUT_NORM,
         MODEL_TENSOR.OUTPUT,
@@ -4887,6 +4971,7 @@ class VisionProjectorType:
     DEEPSEEKOCR2 = "deepseekocr2"
     LFM2A = "lfm2a" # audio
     MUSIC_FLAMINGO = "musicflamingo" # audio
+    MOSS_MUSIC = "moss_music" # audio
     GLM4V = "glm4v"
     YOUTUVL = "youtuvl"
     NEMOTRON_V2_VL = "nemotron_v2_vl"

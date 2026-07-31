@@ -876,7 +876,7 @@ float * llama_context::get_logits_ith(int32_t i) {
         }
 
         const int64_t j = output_resolve_row(i);
-        return logits.data + j*model.vocab.n_tokens();
+        return logits.data + j*logits_stride;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: invalid logits id %d, reason: %s\n", __func__, i, err.what());
 #ifndef NDEBUG
@@ -1400,7 +1400,7 @@ int llama_context::encode(const llama_batch & batch_inp) {
 
     // eagle3/DFlash: features as encoder input, and non-draft paths fall back to model's input dim
     const int64_t n_embd = hparams.n_embd_inp_enc();
-    const int64_t n_vocab = model.vocab.n_tokens();
+    const int64_t n_logits = model.n_logits();
 
     // note: during encode, we always pass the full sequence starting from pos = 0
     if (!balloc->init(batch_inp, model.vocab, nullptr, n_embd, cparams.kv_unified ? LLAMA_MAX_SEQ : cparams.n_seq_max, true)) {
@@ -1471,7 +1471,7 @@ int llama_context::encode(const llama_batch & batch_inp) {
         GGML_ASSERT(backend_res != nullptr);
         GGML_ASSERT(logits.data != nullptr);
 
-        ggml_backend_tensor_get_async(backend_res, t_logits, logits.data, 0, n_tokens*n_vocab*sizeof(float));
+        ggml_backend_tensor_get_async(backend_res, t_logits, logits.data, 0, n_tokens*n_logits*sizeof(float));
     }
 
     // extract embeddings
@@ -1905,12 +1905,13 @@ int llama_context::decode(const llama_batch & batch_inp) {
             GGML_ASSERT(backend_res != nullptr);
             GGML_ASSERT(logits.data != nullptr);
 
-            float * logits_out = logits.data + n_outputs_prev*n_vocab;
+            const int64_t n_logits = model.n_logits();
+            float * logits_out = logits.data + n_outputs_prev*n_logits;
 
             if (n_outputs) {
                 GGML_ASSERT( n_outputs_prev + n_outputs <= n_outputs_all);
-                GGML_ASSERT((n_outputs_prev + n_outputs)*n_vocab <= (int64_t) logits.size);
-                ggml_backend_tensor_get_async(backend_res, t_logits, logits_out, 0, n_outputs*n_vocab*sizeof(float));
+                GGML_ASSERT((n_outputs_prev + n_outputs)*n_logits <= (int64_t) logits.size);
+                ggml_backend_tensor_get_async(backend_res, t_logits, logits_out, 0, n_outputs*n_logits*sizeof(float));
             }
         }
 
@@ -2081,6 +2082,7 @@ uint32_t llama_context::output_reserve(int32_t n_outputs) {
     const auto n_batch    = cparams.n_batch;
     const auto n_vocab    = vocab.n_tokens();
     const auto n_embd     = hparams.n_embd;
+    const auto n_logits   = model.n_logits();
     const auto n_embd_out = hparams.n_embd_out();
 
     bool has_logits     = true;
@@ -2097,7 +2099,8 @@ uint32_t llama_context::output_reserve(int32_t n_outputs) {
     size_t backend_token_count = 0;
     size_t embd_layer_inp_float_count = 0;
 
-    logits.size     = has_logits     ? n_vocab*n_outputs_max     : 0;
+    logits_stride   = has_logits     ? n_logits                  : 0;
+    logits.size     = has_logits     ? n_logits*n_outputs_max    : 0;
     embd.size       = has_embd       ? n_embd_out*n_outputs_max  : 0;
     embd_nextn.size = has_embd_nextn ? n_embd_out*n_outputs_max  : 0;
 
@@ -2263,16 +2266,17 @@ void llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
 }
 
 void llama_context::output_reorder() {
-    const uint64_t n_vocab = model.vocab.n_tokens();
-    const uint64_t n_embd  = model.hparams.n_embd;
+    const uint64_t n_logits = logits_stride;
+    const uint64_t n_vocab  = model.vocab.n_tokens();
+    const uint64_t n_embd   = model.hparams.n_embd;
 
     for (size_t s = 0; s < output_swaps.size(); ++s) {
         const uint64_t i0 = output_swaps[s].i0;
         const uint64_t i1 = output_swaps[s].i1;
 
         if (logits.size > 0) {
-            for (uint64_t k = 0; k < n_vocab; k++) {
-                std::swap(logits.data[i0*n_vocab + k], logits.data[i1*n_vocab + k]);
+            for (uint64_t k = 0; k < n_logits; k++) {
+                std::swap(logits.data[i0*n_logits + k], logits.data[i1*n_logits + k]);
             }
         }
 
