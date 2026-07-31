@@ -114,10 +114,6 @@ if (GGML_HIP_NO_VMM)
     add_compile_definitions(GGML_HIP_NO_VMM)
 endif()
 
-if (GGML_HIP_ROCWMMA_FATTN)
-    add_compile_definitions(GGML_HIP_ROCWMMA_FATTN)
-endif()
-
 if (NOT GGML_HIP_MMQ_MFMA)
     add_compile_definitions(GGML_HIP_NO_MMQ_MFMA)
 endif()
@@ -159,4 +155,47 @@ endif()
 
 target_link_libraries(ggml-hip PRIVATE ggml-base hip::host roc::rocblas roc::hipblas)
 
-target_compile_options(ggml-hip PRIVATE "$<$<COMPILE_LANGUAGE:HIP>:-ffast-math;-fno-finite-math-only>")
+# Stage the HIP runtime beside the built binaries (Windows).
+#
+# The HIP runtime loaded at run time must be the one this backend was compiled
+# against. With none present next to the binaries, Windows resolves amdhip64
+# from System32 - the display driver's copy - because the dependency comes in
+# through ggml-hip's import table, which PATH order does not affect. If that
+# copy's version differs from the SDK used here, the mismatch does not fail
+# cleanly at load: hipMemGetInfo starts returning "invalid argument" and the
+# process later faults inside the HIP runtime on one of its own worker threads.
+if (WIN32)
+    set(GGML_HIP_RUNTIME_DIRS "")
+    if (DEFINED ENV{HIP_PATH})
+        list(APPEND GGML_HIP_RUNTIME_DIRS "$ENV{HIP_PATH}/bin")
+    endif()
+    list(APPEND GGML_HIP_RUNTIME_DIRS "${ROCM_PATH}/bin")
+
+    set(GGML_HIP_RUNTIME_DLLS "")
+    foreach (dir IN LISTS GGML_HIP_RUNTIME_DIRS)
+        if (EXISTS "${dir}")
+            file(GLOB found
+                "${dir}/amdhip64*.dll"
+                "${dir}/amd_comgr*.dll"
+                "${dir}/hipblas.dll"
+                "${dir}/libhipblaslt.dll"
+                "${dir}/rocblas.dll")
+            list(APPEND GGML_HIP_RUNTIME_DLLS ${found})
+        endif()
+    endforeach()
+
+    if (GGML_HIP_RUNTIME_DLLS)
+        list(REMOVE_DUPLICATES GGML_HIP_RUNTIME_DLLS)
+        foreach (dll IN LISTS GGML_HIP_RUNTIME_DLLS)
+            add_custom_command(TARGET ggml-hip POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${dll}" "$<TARGET_FILE_DIR:ggml-hip>")
+        endforeach()
+        message(STATUS "ggml-hip: staging HIP runtime from ${GGML_HIP_RUNTIME_DIRS}")
+    else()
+        message(WARNING
+            "ggml-hip: no HIP runtime DLLs found to stage; the process will bind "
+            "the driver's copy from System32, which may not match this SDK. "
+            "Set HIP_PATH or ROCM_PATH to the SDK you built against.")
+    endif()
+endif()
