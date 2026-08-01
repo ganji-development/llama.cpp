@@ -157,3 +157,5 @@ AGENTS.local.md
 # local dependency downloads and scratch CMake probes (not source)
 .deps/
 openssl-probe/
+
+!build.ps1
