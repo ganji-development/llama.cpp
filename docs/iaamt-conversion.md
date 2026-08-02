@@ -356,7 +356,14 @@ two-second bars, the model recovers beats at 0.5 s spacing, downbeats at 2.0,
 4.0 and 6.0 s, a bass line of C → F → G → C, and key C throughout, returning to
 the same `root_chord` class when the harmony returns to C.
 
-All three families produce byte-identical output on CPU and on ROCm.
+All three families produced byte-identical output on CPU and on ROCm when that
+comparison was last run. It is a statement about one configuration, not a
+general guarantee: it holds for an f32 GGUF with every tensor left in f32, and
+only while no op resolves to a lower-precision compute type on one of the two
+backends. An `--outtype f16` conversion, or a backend that computes a step in
+f16, moves the low bits and the outputs stop matching exactly. The measurement
+also predates the ggml revision vendored here and has not been repeated against
+it.
 
 ### Running on ROCm under Windows
 
@@ -368,18 +375,35 @@ in `ggml_backend_cuda_device_get_memory` with `hipMemGetInfo: invalid argument`
 the executable, which the loader searches first:
 
 ```powershell
-Copy-Item "$env:ROCM_PATHinmdhip64_7.dll" .uildin```
+Copy-Item "$env:ROCM_PATH\bin\amdhip64_7.dll" .\build\bin\
+```
+
+The build stages this automatically, so the copy above is only a fallback for a
+tree configured without `HIP_PATH`/`ROCM_PATH`: `ggml/src/ggml-hip/CMakeLists.txt`
+copies the HIP runtime into the binary directory after `ggml-hip` links, and
+`ggml/src/CMakeLists.txt` does the same for `libomp.dll` when OpenMP resolves to
+an LLVM import library rather than MSVC's `vcomp`. `libomp.dll` is needed by
+every executable, not just the HIP ones, because `ggml-base` links OpenMP - a
+missing one makes each binary in `build/bin` fail to start with `0xC0000135`
+(`STATUS_DLL_NOT_FOUND`) unless LLVM's `bin` is on `PATH`.
 
 ### Backend op notes
 
-Two ops needed care and are worth knowing about before extending the graph:
+Three ops needed care and are worth knowing about before extending the graph:
 
 - `ggml_conv_transpose_1d` accepts only a 2-D input, so the pitch-track upsample
   is expressed as a matmul instead (kernel and stride are equal, so the two are
   identical).
+- `ggml_conv_2d` builds its im2col at f16 regardless of the kernel type, then
+  matmuls it against the kernel, so both the activations and an f32 kernel are
+  rounded to half precision inside the product; the result also needs a
+  `ggml_cont(ggml_permute(...))`. The stem uses `ggml_conv_2d_direct`, which
+  takes the same argument order and kernel layout, stays f32 end to end and
+  allocates no im2col buffer. Its CUDA kernel is an untiled direct convolution,
+  so the wide 3x3 blocks give up a GEMM for a plain loop.
 - `ggml_conv_2d_dw` builds an f16 im2col and feeds it to `mul_mat`'s `src1`,
   which no backend accepts; `ggml_conv_2d_dw_direct` works. It wants an **f32**
-  kernel: CUDA asserts on f32, while the CPU path reads the kernel as float
+  kernel: CUDA asserts on f16, while the CPU path reads the kernel as float
   without checking, so an f16 kernel is silently misread rather than rejected.
   `ggml_conv_1d`, by contrast, always builds an f16 im2col and so needs an f16
   kernel.

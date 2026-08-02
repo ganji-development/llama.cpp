@@ -66,7 +66,7 @@ ggml_tensor * iaamt_conv_block(ggml_context * ctx,
                          ggml_tensor * cur,
                          int s0, int s1,
                          bool act) {
-    cur = ggml_conv_2d(ctx, blk.conv_w, cur, s0, s1, 1, 1, 1, 1);
+    cur = ggml_conv_2d_direct(ctx, blk.conv_w, cur, s0, s1, 1, 1, 1, 1);
     cur = iaamt_add_bias_chan(ctx, cur, blk.conv_b);
     cur = ggml_group_norm(ctx, cur, 4, IAAMT_NORM_EPS);
     cur = ggml_mul(ctx, cur, ggml_reshape_4d(ctx, blk.norm_w, 1, 1, blk.norm_w->ne[0], 1));
@@ -185,10 +185,10 @@ ggml_cgraph * build_graph(iaamt_context * ctx0, int n_frames, int crop_length) {
     ggml_tensor * cur = ctx0->inp_feats;
 
     // ---- conv stem ----
-    cur = ggml_conv_2d(ctx, model.stem_conv1_w, cur, 1, 1, 3, 3, 1, 1);
+    cur = ggml_conv_2d_direct(ctx, model.stem_conv1_w, cur, 1, 1, 3, 3, 1, 1);
     cur = iaamt_add_bias_chan(ctx, cur, model.stem_conv1_b);
     cur = ggml_add(ctx, cur, model.stem_freq_embd);          // [F, 1, base_ch, 1]
-    cur = ggml_conv_2d(ctx, model.stem_conv2_w, cur, 1, 1, 2, 2, 1, 1);
+    cur = ggml_conv_2d_direct(ctx, model.stem_conv2_w, cur, 1, 1, 2, 2, 1, 1);
     cur = iaamt_add_bias_chan(ctx, cur, model.stem_conv2_b);
 
     // torch strides are (time, freq); ggml dim0 is freq, dim1 is time

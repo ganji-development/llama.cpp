@@ -237,6 +237,30 @@ endif()
 if (GGML_OPENMP_ENABLED)
     target_compile_definitions(ggml-base PRIVATE GGML_USE_OPENMP)
     target_link_libraries(ggml-base PRIVATE OpenMP::OpenMP_C OpenMP::OpenMP_CXX)
+
+    # Stage libomp.dll beside the built binaries (Windows, LLVM/clang OpenMP).
+    #
+    # MSVC's vcomp ships with the redistributable and is always resolvable, but
+    # an LLVM OpenMP is linked through an import library whose DLL only lives in
+    # the toolchain's bin directory. ggml-base pulls it into every executable,
+    # so without a copy here each one fails to start with 0xC0000135 unless that
+    # directory happens to be on PATH.
+    if (WIN32 AND EXISTS "${OpenMP_omp_LIBRARY}")
+        get_filename_component(GGML_OPENMP_LIB_DIR "${OpenMP_omp_LIBRARY}" DIRECTORY)
+        find_file(GGML_OPENMP_RUNTIME_DLL libomp.dll
+            HINTS "${GGML_OPENMP_LIB_DIR}" "${GGML_OPENMP_LIB_DIR}/../bin"
+            NO_DEFAULT_PATH)
+        if (GGML_OPENMP_RUNTIME_DLL)
+            add_custom_command(TARGET ggml-base POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${GGML_OPENMP_RUNTIME_DLL}" "$<TARGET_FILE_DIR:ggml-base>")
+            message(STATUS "ggml: staging ${GGML_OPENMP_RUNTIME_DLL}")
+        else()
+            message(WARNING
+                "ggml: libomp.dll not found next to ${OpenMP_omp_LIBRARY}; the built "
+                "binaries will not start unless it is on PATH.")
+        endif()
+    endif()
 endif()
 
 add_library(ggml
