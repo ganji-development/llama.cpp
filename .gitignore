@@ -158,4 +158,3 @@ AGENTS.local.md
 .deps/
 openssl-probe/
 
-!build.ps1

@@ -1,0 +1,4 @@
+# convert_iaamt_to_gguf.py reads torch.save archives directly, so torch is not
+# needed -- only numpy and the bundled gguf-py.
+numpy~=1.26.4
+gguf>=0.1.0
