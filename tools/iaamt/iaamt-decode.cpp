@@ -258,6 +258,22 @@ bool predict_boundary(const iaamt_model & model,
 
 } // namespace
 
+std::vector<int64_t> iaamt_build_window_starts(int64_t total, int64_t window, int64_t stride) {
+    std::vector<int64_t> starts;
+    if (total <= window) {
+        starts.push_back(0);
+        return starts;
+    }
+    for (int64_t s = 0; s < total - window + 1; s += stride) {
+        starts.push_back(s);
+    }
+    const int64_t last = total - window;
+    if (starts.back() != last) {
+        starts.push_back(last);
+    }
+    return starts;
+}
+
 void iaamt_stitcher_init(iaamt_stitcher & st,
                          const iaamt_model & model,
                          const iaamt_decode_params & params,

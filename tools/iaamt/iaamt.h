@@ -415,6 +415,13 @@ struct iaamt_stitcher {
     std::vector<std::vector<iaamt_note>> by_track;
 };
 
+// _build_window_starts: analysis windows advance by `stride`, and a final one
+// is placed at `total - window` so the tail is covered by a full window rather
+// than a short one. Shared rather than duplicated because getting this wrong
+// changes which notes are found, and silently: a second copy that merely looks
+// right would drift from this one without failing anything.
+std::vector<int64_t> iaamt_build_window_starts(int64_t total, int64_t window, int64_t stride);
+
 void iaamt_stitcher_init(iaamt_stitcher & st,
                          const iaamt_model & model,
                          const iaamt_decode_params & params,

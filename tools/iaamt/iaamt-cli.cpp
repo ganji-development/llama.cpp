@@ -47,6 +47,8 @@ struct cli_params {
     bool  no_boundary    = false;
     bool  verbose        = false;
     std::string dump_prefix;    // writes window-0 intermediates as .npy
+    std::string dump_notes;     // writes the decoded notes as text
+    std::string dump_pcm;       // writes the decoded audio as planar f32
     std::string in_midi;        // velocity models: the notes to score
 };
 
@@ -64,6 +66,8 @@ static void print_usage(const char * argv0) {
     printf("      --merge-onset-ms F merge notes starting within F ms (default 50)\n");
     printf("      --merge-gap-ms F   merge continuations across F ms (default: one hop)\n");
     printf("      --min-note-ms F    drop notes shorter than F ms (default 5)\n");
+    printf("      --dump-notes PATH  write the decoded notes as text, before MIDI\n");
+    printf("      --dump-pcm PATH    write the decoded audio as planar f32\n");
     printf("      --velocity N       MIDI velocity for every note (default 100)\n");
     printf("      --silence-dbfs F   skip windows quieter than F dBFS (default -72)\n");
     printf("      --no-boundary      skip the sub-frame boundary head\n");
@@ -110,6 +114,10 @@ static bool parse_args(int argc, char ** argv, cli_params & p) {
             const char * v = next("--midi"); if (!v) return false; p.in_midi = v;
         } else if (a == "--dump-prefix") {
             const char * v = next("--dump-prefix"); if (!v) return false; p.dump_prefix = v;
+        } else if (a == "--dump-notes") {
+            const char * v = next("--dump-notes"); if (!v) return false; p.dump_notes = v;
+        } else if (a == "--dump-pcm") {
+            const char * v = next("--dump-pcm"); if (!v) return false; p.dump_pcm = v;
         } else if (a == "--no-boundary") {
             p.no_boundary = true;
         } else if (a == "-v" || a == "--verbose") {
@@ -193,23 +201,6 @@ static bool write_npy(const std::string & path,
     fwrite(data.data(), sizeof(float), data.size(), f);
     fclose(f);
     return true;
-}
-
-// _build_window_starts
-static std::vector<int64_t> build_window_starts(int64_t total, int64_t window, int64_t stride) {
-    std::vector<int64_t> starts;
-    if (total <= window) {
-        starts.push_back(0);
-        return starts;
-    }
-    for (int64_t s = 0; s < total - window + 1; s += stride) {
-        starts.push_back(s);
-    }
-    const int64_t last = total - window;
-    if (starts.back() != last) {
-        starts.push_back(last);
-    }
-    return starts;
 }
 
 int main(int argc, char ** argv) {
@@ -297,6 +288,27 @@ int main(int argc, char ** argv) {
     printf("audio  : %s (%.2f s)\n", params.audio.c_str(),
            (double) total_samples / hp.sample_rate);
 
+    // The decoded audio as the model receives it: planar f32, one channel after
+    // another, already resampled to the model's rate. Sources are rarely at
+    // that rate, and a resampler built by a different compiler produces samples
+    // that differ in their last bits - enough to move continuous outputs like
+    // the interval scores while leaving note boundaries, which quantise to hop
+    // frames, untouched. Comparing another consumer of this decoder against the
+    // CLI is only exact if both are fed these bytes rather than the same file.
+    if (!params.dump_pcm.empty()) {
+        FILE * f = fopen(params.dump_pcm.c_str(), "wb");
+        if (f == nullptr) {
+            fprintf(stderr, "error: cannot write %s\n", params.dump_pcm.c_str());
+            return 1;
+        }
+        for (const auto & ch : pcm) {
+            fwrite(ch.data(), sizeof(float), ch.size(), f);
+        }
+        fclose(f);
+        printf("pcm    : %zu ch x %lld samples written to %s\n",
+               pcm.size(), (long long) total_samples, params.dump_pcm.c_str());
+    }
+
     const int64_t window_samples =
         (int64_t) llround(params.window_ms * hp.sample_rate / 1000.0);
     const int64_t stride_samples =
@@ -308,7 +320,7 @@ int main(int argc, char ** argv) {
     }
 
     const std::vector<int64_t> starts =
-        build_window_starts(total_samples, window_samples, stride_samples);
+        iaamt_build_window_starts(total_samples, window_samples, stride_samples);
 
     const bool is_velocity   = (hp.model_type == IAAMT_MODEL_TYPE_VELOCITY);
     const bool is_beat_chord = (hp.model_type == IAAMT_MODEL_TYPE_BEAT_CHORD);
@@ -508,6 +520,28 @@ int main(int argc, char ** argv) {
                    onset_conf.front(), pct(0.05), pct(0.50),
                    sum_c / (double) onset_conf.size(), onset_conf.back(), below);
         }
+    }
+
+    // The notes as the decoder produced them, before MIDI. MIDI cannot express
+    // two overlapping notes of the same pitch unambiguously - a reader pairing
+    // note-ons to note-offs has to guess - so a decode compared through a MIDI
+    // file appears to disagree on exactly those notes even when it does not.
+    // This is the artifact to compare against when checking another consumer of
+    // the decoder, such as the C ABI, produces the same result.
+    if (!params.dump_notes.empty()) {
+        FILE * f = fopen(params.dump_notes.c_str(), "wb");
+        if (f == nullptr) {
+            fprintf(stderr, "error: cannot write %s\n", params.dump_notes.c_str());
+            return 1;
+        }
+        fprintf(f, "notes %zu\n", notes.size());
+        for (const iaamt_note & n : notes) {
+            fprintf(f, "%d %lld %lld %d %.6f %.6f\n",
+                    n.pitch, (long long) n.start_sample, (long long) n.end_sample,
+                    n.velocity, n.crf_score, n.onset_confidence);
+        }
+        fclose(f);
+        printf("notes  : %zu written to %s\n", notes.size(), params.dump_notes.c_str());
     }
 
     if (!iaamt_write_midi(params.out_midi, notes, hp.sample_rate, err)) {
