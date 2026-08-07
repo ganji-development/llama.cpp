@@ -147,6 +147,35 @@ elseif (LLAMA_OPENSSL)
             message(STATUS "OpenSSL found: ${OPENSSL_VERSION}")
             set(CPPHTTPLIB_OPENSSL_SUPPORT TRUE)
             target_link_libraries(${TARGET} PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+
+            # Stage the OpenSSL runtime beside the built binaries (Windows).
+            # This is a static library, so the import libraries reach the
+            # executables but their DLLs do not; without a copy here anything
+            # linking httplib fails to start with 0xC0000135 unless OpenSSL's
+            # directory happens to be on PATH. The DLLs sit next to the import
+            # libraries when OpenSSL is built in place, and in bin/ when it is
+            # installed, so look in both.
+            if (WIN32)
+                get_filename_component(_ssl_lib_dir "${OPENSSL_SSL_LIBRARY}" DIRECTORY)
+                file(GLOB _ssl_dlls
+                    "${_ssl_lib_dir}/libssl*.dll"    "${_ssl_lib_dir}/libcrypto*.dll"
+                    "${_ssl_lib_dir}/../libssl*.dll" "${_ssl_lib_dir}/../libcrypto*.dll"
+                    "${_ssl_lib_dir}/../bin/libssl*.dll"
+                    "${_ssl_lib_dir}/../bin/libcrypto*.dll")
+                if (_ssl_dlls)
+                    list(REMOVE_DUPLICATES _ssl_dlls)
+                    foreach (dll IN LISTS _ssl_dlls)
+                        add_custom_command(TARGET ${TARGET} POST_BUILD
+                            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                                    "${dll}" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+                    endforeach()
+                    message(STATUS "cpp-httplib: staging ${_ssl_dlls}")
+                else()
+                    message(WARNING
+                        "cpp-httplib: no OpenSSL DLLs found near ${OPENSSL_SSL_LIBRARY}; "
+                        "binaries linking it will not start unless it is on PATH.")
+                endif()
+            endif()
         endif()
     else()
         message(WARNING "OpenSSL not found, HTTPS support disabled")

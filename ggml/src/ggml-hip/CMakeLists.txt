@@ -174,12 +174,20 @@ if (WIN32)
     set(GGML_HIP_RUNTIME_DLLS "")
     foreach (dir IN LISTS GGML_HIP_RUNTIME_DIRS)
         if (EXISTS "${dir}")
+            # rocsolver, rocm_kpack and origami are not linked here; they come
+            # in transitively through hipblas, rocblas and hipblaslt, so they
+            # have to be staged too or the executables fail to start with
+            # 0xC0000135. Which of them exist varies by ROCm build, hence the
+            # glob: absent ones simply contribute nothing.
             file(GLOB found
                 "${dir}/amdhip64*.dll"
                 "${dir}/amd_comgr*.dll"
                 "${dir}/hipblas.dll"
                 "${dir}/libhipblaslt.dll"
-                "${dir}/rocblas.dll")
+                "${dir}/rocblas.dll"
+                "${dir}/rocsolver.dll"
+                "${dir}/rocm_kpack.dll"
+                "${dir}/origami.dll")
             list(APPEND GGML_HIP_RUNTIME_DLLS ${found})
         endif()
     endforeach()

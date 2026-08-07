@@ -1200,8 +1200,11 @@ static __device__ __forceinline__ void flash_attn_ext_f16_process_tile(
     // Q in registers is faster, but register pressure is the biggest bottleneck.
     // The loading is done with decreasing granularity for D for better memory bandwidth.
     const half2 scale_h2 = make_half2(scale, scale);
+    // Named array rather than a braced-init-list: iterating one goes through
+    // std::begin on an initializer_list, which is host-only here.
+    constexpr int stride_ks[] = {warp_size, warp_size/2, warp_size/4, warp_size/8};
 #pragma unroll
-    for (int stride_k : {warp_size, warp_size/2, warp_size/4, warp_size/8}) {
+    for (int stride_k : stride_ks) {
         const int k0_start  = stride_k == warp_size ? 0 : DKQ/2 - (DKQ/2) % (2*stride_k);
         const int k0_stop   =                             DKQ/2 - (DKQ/2) % (1*stride_k);
         const int stride_jc = warp_size / stride_k;
@@ -1631,8 +1634,9 @@ static __device__ __forceinline__ void flash_attn_ext_f16_process_tile(
             // The values after that are for the partial results of the individual blocks.
             float2 * dstk_fixup_data = dstk_fixup + gridDim.x*(2*ncols) + blockIdx.x*(ncols*(DV/2));
 
+            constexpr int stride_ks[] = {warp_size, warp_size/2, warp_size/4, warp_size/8};
 #pragma unroll
-            for (int stride_k : {warp_size, warp_size/2, warp_size/4, warp_size/8}) {
+            for (int stride_k : stride_ks) {
                 const int k0_start  = stride_k == warp_size ? 0 : nbatch_combine - nbatch_combine % (2*stride_k);
                 const int k0_stop   =                             nbatch_combine - nbatch_combine % (1*stride_k);
                 const int stride_jc = warp_size / stride_k;
