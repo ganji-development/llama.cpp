@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -448,16 +449,65 @@ int main(int argc, char ** argv) {
     // A run where min and max are nearly equal has ranked nothing, which is
     // worth seeing without having to dump every note.
     if (!is_velocity && !notes.empty()) {
-        float lo = notes[0].crf_score;
-        float hi = notes[0].crf_score;
-        double sum = 0.0;
+        std::vector<float> crf;
+        crf.reserve(notes.size());
         for (const iaamt_note & n : notes) {
-            lo = std::min(lo, n.crf_score);
-            hi = std::max(hi, n.crf_score);
-            sum += n.crf_score;
+            crf.push_back(n.crf_score);
         }
-        printf("crf    : score min %.3f, mean %.3f, max %.3f\n",
-               lo, sum / (double) notes.size(), hi);
+        std::sort(crf.begin(), crf.end());
+        const auto crf_pct = [&](double p) {
+            return crf[(size_t) std::llround(p * (double) (crf.size() - 1))];
+        };
+        // sigmoid(score) is reported beside the raw value because the decode
+        // admits an interval exactly when its score exceeds zero, which is the
+        // same test as sigmoid > 0.5. That makes the logistic the mapping the
+        // decoder itself implies rather than a fitted one - and it also makes
+        // plain that no surviving note can score below 0.5, which a consumer
+        // setting a threshold needs to know.
+        const auto sig = [](float x) { return 1.0f / (1.0f + std::exp(-x)); };
+        printf("crf    : score min %.4f p05 %.4f p50 %.4f p95 %.4f max %.4f\n",
+               crf.front(), crf_pct(0.05), crf_pct(0.50), crf_pct(0.95), crf.back());
+        printf("crf    : sigmoid  min %.4f p05 %.4f p50 %.4f p95 %.4f max %.4f\n",
+               sig(crf.front()), sig(crf_pct(0.05)), sig(crf_pct(0.50)),
+               sig(crf_pct(0.95)), sig(crf.back()));
+
+        // Boundary probabilities are reported separately and only over the
+        // notes that actually have them, so an unmeasured note cannot be
+        // averaged in as if it were a low score. The count is printed because
+        // "mean 0.9 over 3 of 408" and "mean 0.9 over 408" mean very different
+        // things about how much of the transcription this describes.
+        std::vector<float> onset_conf;
+        onset_conf.reserve(notes.size());
+        for (const iaamt_note & n : notes) {
+            if (n.onset_confidence >= 0.0f) {
+                onset_conf.push_back(n.onset_confidence);
+            }
+        }
+        if (onset_conf.empty()) {
+            printf("bound  : boundary head did not run; onset flags are positional\n");
+        } else {
+            std::sort(onset_conf.begin(), onset_conf.end());
+            const double sum_c = std::accumulate(onset_conf.begin(), onset_conf.end(), 0.0);
+            // The mean alone cannot distinguish a head that ranks notes from one
+            // saturated near 1.0 for everything it lets through. The low
+            // percentiles and the sub-0.9 count are what show whether this
+            // discriminates, so they are printed rather than inferred.
+            const auto pct = [&](double p) {
+                const size_t i = (size_t) std::llround(p * (double) (onset_conf.size() - 1));
+                return onset_conf[i];
+            };
+            size_t below = 0;
+            for (float c : onset_conf) {
+                if (c < 0.9f) {
+                    ++below;
+                }
+            }
+            printf("bound  : onset confidence over %zu of %zu note(s): "
+                   "min %.4f p05 %.4f p50 %.4f mean %.4f max %.4f, %zu below 0.9\n",
+                   onset_conf.size(), notes.size(),
+                   onset_conf.front(), pct(0.05), pct(0.50),
+                   sum_c / (double) onset_conf.size(), onset_conf.back(), below);
+        }
     }
 
     if (!iaamt_write_midi(params.out_midi, notes, hp.sample_rate, err)) {

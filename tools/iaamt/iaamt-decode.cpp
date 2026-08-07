@@ -157,6 +157,21 @@ void viterbi_backward(const std::vector<float> & score,
     out.swap(clean);
 }
 
+// Combines two boundary probabilities under the same rule as the flags they
+// threshold. `has_onset` merges with OR, and max is its exact analogue: max
+// exceeds 0.5 precisely when either input does. Unknown is contagious - if
+// either side never ran the head, the merged flag may have been decided by a
+// value we do not have, and reporting the known side alone would present a
+// number that does not explain the flag beside it. In practice the head is
+// enabled or disabled for a whole run, so a mixed pair does not arise; this is
+// written to be correct rather than to rely on that.
+float merge_boundary_prob(float a, float b) {
+    if (a < 0.0f || b < 0.0f) {
+        return -1.0f;
+    }
+    return std::max(a, b);
+}
+
 // torch.distributions.ContinuousBernoulli(logits).mean
 float continuous_bernoulli_mean(float logits) {
     const float p = 1.0f / (1.0f + std::exp(-logits));
@@ -171,6 +186,12 @@ struct boundary_flag {
     bool  has_offset;
     float onset_off;
     float offset_off;
+    // sigmoid of the boundary head's onset/offset logits. The bools above are
+    // these thresholded at 0.5, so the probability is strictly more information
+    // and the flags stay derivable from it. Negative when the head did not run,
+    // which is not the same as "improbable" and must not be read as a low score.
+    float onset_prob;
+    float offset_prob;
 };
 
 // IntervalBoundaryPredictor over concat(begin, end, begin*end)
@@ -226,6 +247,12 @@ bool predict_boundary(const iaamt_model & model,
     flag.has_offset = logits[1] > 0.0f;
     flag.onset_off  = std::min(std::max((continuous_bernoulli_mean(logits[2]) - 0.005f) / 0.99f, 0.0f), 1.0f);
     flag.offset_off = std::min(std::max((continuous_bernoulli_mean(logits[3]) - 0.005f) / 0.99f, 0.0f), 1.0f);
+    // These two heads are trained as binary classifiers, so a sigmoid is the
+    // calibrated read of their logits - unlike the semi-CRF interval score,
+    // which is length-scaled and has no such mapping. Keeping only the sign, as
+    // the flags above do, discards how sure the model was.
+    flag.onset_prob  = 1.0f / (1.0f + std::exp(-logits[0]));
+    flag.offset_prob = 1.0f / (1.0f + std::exp(-logits[1]));
     return true;
 }
 
@@ -303,6 +330,13 @@ int iaamt_stitcher_consume(iaamt_stitcher & st,
                 if (window_start_sample == 0 && iv.begin == 0) {
                     flag.has_onset = true;
                 }
+                // These flags come from where the interval sits in the window,
+                // not from the model, so there is no probability to report.
+                // Negative marks it absent rather than improbable: a consumer
+                // that treated a fabricated 1.0 as measured would be trusting
+                // the window layout as if it were evidence.
+                flag.onset_prob  = -1.0f;
+                flag.offset_prob = -1.0f;
             }
 
             if (flag.has_offset) {
@@ -333,6 +367,8 @@ int iaamt_stitcher_consume(iaamt_stitcher & st,
             note.has_onset    = flag.has_onset;
             note.has_offset   = flag.has_offset;
             note.crf_score    = iv.score;
+            note.onset_confidence  = flag.onset_prob;
+            note.offset_confidence = flag.offset_prob;
             st.by_track[track].push_back(note);
         }
     }
@@ -345,7 +381,13 @@ std::vector<iaamt_note> iaamt_stitcher_finalize(iaamt_stitcher & st,
     std::vector<iaamt_note> all;
     for (auto & track_notes : st.by_track) {
         if (!track_notes.empty()) {
+            // The last note on a track is closed because the audio ended, not
+            // because the model said so, so any offset probability it carries no
+            // longer explains this flag. Clearing it to unknown keeps the two
+            // consistent; leaving a measured value beside an imposed flag would
+            // invite a reader to treat the closure as evidence.
             track_notes.back().has_offset = true;
+            track_notes.back().offset_confidence = -1.0f;
         }
         all.insert(all.end(), track_notes.begin(), track_notes.end());
     }
@@ -376,6 +418,13 @@ std::vector<iaamt_note> iaamt_stitcher_finalize(iaamt_stitcher & st,
             cur.velocity   = std::max(cur.velocity, n.velocity);
             cur.has_onset  = cur.has_onset || n.has_onset;
             cur.has_offset = by_gap ? n.has_offset : (cur.has_offset || n.has_offset);
+            // Each probability follows the flag it thresholds, including the
+            // by_gap case where the offset is taken from the absorbed note
+            // rather than combined.
+            cur.onset_confidence  = merge_boundary_prob(cur.onset_confidence, n.onset_confidence);
+            cur.offset_confidence = by_gap
+                ? n.offset_confidence
+                : merge_boundary_prob(cur.offset_confidence, n.offset_confidence);
             // The pieces being merged are segments of one note, not competing
             // explanations of it, so the strongest segment is the evidence that
             // the note is there. Taking the minimum would let a weakly scored

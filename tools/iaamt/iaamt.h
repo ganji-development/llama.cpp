@@ -371,6 +371,23 @@ struct iaamt_note {
     // within a single transcription is what this supports; an absolute cutoff
     // is not, without a calibration that does not exist yet.
     float crf_score    = 0.0f;
+
+    // Boundary-head probabilities for this note's onset and offset, in 0..1.
+    // These come from a different head than `crf_score` and answer a different
+    // question - whether this edge is a real note boundary, rather than whether
+    // the interval is a real note - so they are genuine separate measurements
+    // and not restatements of the score. Being trained binary classifiers they
+    // are calibrated, which `crf_score` is not, so a fixed threshold is
+    // meaningful here in a way it is not there. `has_onset` and `has_offset`
+    // are exactly these thresholded at 0.5.
+    //
+    // **Negative means the head did not run**, because the model carries no
+    // boundary weights or the caller disabled it. That is "unknown", not
+    // "improbable": the flags then reflect where the interval sat in its window
+    // rather than anything the model asserted, and reading the absence as a low
+    // confidence would turn window layout into evidence it is not.
+    float onset_confidence  = -1.0f;
+    float offset_confidence = -1.0f;
 };
 
 struct iaamt_decode_params {
