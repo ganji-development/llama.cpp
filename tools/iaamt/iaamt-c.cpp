@@ -19,6 +19,31 @@
 #include <string>
 #include <vector>
 
+// Resampling only: the decoders and device backends are not needed here, since
+// the caller supplies decoded samples. This is the same resampler the CLI gets
+// through ma_decoder, which is the point - one implementation, so every
+// consumer of this model sees the same samples for the same source.
+//
+// NOMINMAX because miniaudio reaches windows.h, whose min/max macros break the
+// explicitly qualified std::min above.
+#define NOMINMAX
+#define MA_NO_DECODING
+#define MA_NO_ENCODING
+#define MA_NO_DEVICE_IO
+#define MA_NO_THREADING
+#define MA_NO_GENERATION
+#define MINIAUDIO_IMPLEMENTATION
+#include "miniaudio/miniaudio.h"
+
+// NOMINMAX alone is not enough: something earlier in this translation unit
+// already reached windows.h without it, so by here the macros exist regardless.
+#ifdef min
+#  undef min
+#endif
+#ifdef max
+#  undef max
+#endif
+
 namespace {
 
 void set_err(char * err, size_t err_size, const std::string & msg) {
@@ -114,6 +139,7 @@ int32_t iaamt_c_transcribe(iaamt_session *        session,
                            const float * const *  channels,
                            int32_t                n_channels,
                            int64_t                n_samples,
+                           int32_t                sample_rate,
                            const iaamt_c_params * params,
                            iaamt_c_note **        out_notes,
                            size_t *               out_count,
@@ -126,6 +152,10 @@ int32_t iaamt_c_transcribe(iaamt_session *        session,
     }
     if (n_channels <= 0 || n_samples <= 0) {
         set_err(err, err_size, "audio is empty");
+        return 1;
+    }
+    if (sample_rate <= 0) {
+        set_err(err, err_size, "sample_rate must be positive");
         return 1;
     }
     for (int32_t c = 0; c < n_channels; ++c) {
@@ -166,8 +196,93 @@ int32_t iaamt_c_transcribe(iaamt_session *        session,
         dp.min_note_ms       = params->min_note_ms;
         dp.use_boundary_head = params->use_boundary_head != 0;
 
+        const int n_model_channels = hp.input_audio_channels;
+
+        // Resampling comes before anything that depends on the length, because
+        // the stitcher and the window grid are both in model-rate samples and
+        // seeding them from the caller's rate would put every note in the wrong
+        // place. Done once up front rather than per window, so a window
+        // boundary never falls inside the converter's internal state.
+        // `resampled` owns the converted audio when a conversion happened and
+        // stays empty otherwise, in which case `source` points straight at the
+        // caller's buffers and nothing is copied.
+        std::vector<std::vector<float>> resampled;
+        std::vector<const float *>      source((size_t) n_model_channels);
+        int64_t                         source_samples = n_samples;
+
+        if (sample_rate != hp.sample_rate) {
+            // Interleave at the model's channel count first: ma_data_converter
+            // works on frames, and doing the channel fan-out here means the
+            // duplication of a mono source happens before conversion rather
+            // than after, which is what the CLI's decoder also does.
+            std::vector<float> in((size_t) n_samples * n_model_channels);
+            for (int64_t i = 0; i < n_samples; ++i) {
+                for (int c = 0; c < n_model_channels; ++c) {
+                    in[(size_t) i * n_model_channels + c] =
+                        channels[std::min(c, n_channels - 1)][i];
+                }
+            }
+
+            ma_data_converter_config cfg = ma_data_converter_config_init(
+                ma_format_f32, ma_format_f32,
+                (ma_uint32) n_model_channels, (ma_uint32) n_model_channels,
+                (ma_uint32) sample_rate, (ma_uint32) hp.sample_rate);
+
+            // ma_data_converter_config_init_default leaves lpfOrder at 1, while
+            // the decoder path the CLI uses gets MA_DEFAULT_RESAMPLER_LPF_ORDER
+            // through ma_resampler_config_init. That is not a cosmetic
+            // difference: a first-order low-pass is not enough anti-aliasing for
+            // 2:1 decimation, and the partials that fold back land in the HCQT
+            // as pitch energy that is not in the source. Measured on one bass
+            // stem, the weak filter changed 408 notes into 403.
+            cfg.resampling.linear.lpfOrder = MA_DEFAULT_RESAMPLER_LPF_ORDER;
+
+            ma_data_converter conv;
+            if (ma_data_converter_init(&cfg, nullptr, &conv) != MA_SUCCESS) {
+                set_err(err, err_size, "failed to initialise resampler");
+                return 1;
+            }
+
+            ma_uint64 in_frames  = (ma_uint64) n_samples;
+            ma_uint64 out_frames = 0;
+            ma_data_converter_get_expected_output_frame_count(&conv, in_frames, &out_frames);
+
+            std::vector<float> out((size_t) out_frames * n_model_channels);
+            const ma_result r = ma_data_converter_process_pcm_frames(
+                &conv, in.data(), &in_frames, out.data(), &out_frames);
+            ma_data_converter_uninit(&conv, nullptr);
+            if (r != MA_SUCCESS) {
+                set_err(err, err_size, "resampling failed");
+                return 1;
+            }
+
+            source_samples = (int64_t) out_frames;
+            resampled.assign((size_t) n_model_channels,
+                             std::vector<float>((size_t) source_samples));
+            for (int64_t i = 0; i < source_samples; ++i) {
+                for (int c = 0; c < n_model_channels; ++c) {
+                    resampled[(size_t) c][(size_t) i] =
+                        out[(size_t) i * n_model_channels + c];
+                }
+            }
+            for (int c = 0; c < n_model_channels; ++c) {
+                source[(size_t) c] = resampled[(size_t) c].data();
+            }
+        } else {
+            for (int c = 0; c < n_model_channels; ++c) {
+                source[(size_t) c] = channels[std::min(c, n_channels - 1)];
+            }
+        }
+
+        if (source_samples <= 0) {
+            set_err(err, err_size, "audio is empty after resampling");
+            return 1;
+        }
+
+        // Both of these are in model-rate samples, which is why they come after
+        // the conversion.
         iaamt_stitcher st;
-        iaamt_stitcher_init(st, model, dp, n_samples);
+        iaamt_stitcher_init(st, model, dp, source_samples);
 
         iaamt_context * ctx = iaamt_ctx_init(const_cast<iaamt_model &>(model),
                                              params->n_threads);
@@ -176,7 +291,6 @@ int32_t iaamt_c_transcribe(iaamt_session *        session,
             return 1;
         }
 
-        const int n_model_channels = hp.input_audio_channels;
         std::vector<std::vector<float>> window(
             (size_t) n_model_channels, std::vector<float>((size_t) window_samples));
         std::vector<float> feats;
@@ -186,16 +300,16 @@ int32_t iaamt_c_transcribe(iaamt_session *        session,
             : 0.0f;
 
         const std::vector<int64_t> starts =
-            iaamt_build_window_starts(n_samples, window_samples, stride_samples);
+            iaamt_build_window_starts(source_samples, window_samples, stride_samples);
 
         for (int64_t start : starts) {
-            const int64_t valid = std::min<int64_t>(window_samples, n_samples - start);
+            const int64_t valid = std::min<int64_t>(window_samples, source_samples - start);
 
+            // The channel fan-out for a mono source already happened, either
+            // during conversion or when `source` was pointed at the caller's
+            // buffers, so every entry here is a real channel.
             for (int c = 0; c < n_model_channels; ++c) {
-                // A mono source against a stereo model repeats its last
-                // channel rather than leaving one silent, which would halve the
-                // energy the front end sees.
-                const float * src = channels[std::min(c, n_channels - 1)];
+                const float * src = source[(size_t) c];
                 std::fill(window[(size_t) c].begin(), window[(size_t) c].end(), 0.0f);
                 std::copy(src + start, src + start + valid, window[(size_t) c].begin());
             }

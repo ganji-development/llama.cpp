@@ -41,7 +41,7 @@ extern "C" {
 // with this library, so it must check this before trusting anything else: a
 // mismatched struct read through a stale layout is silent corruption, not a
 // load failure.
-#define IAAMT_C_ABI_VERSION 1
+#define IAAMT_C_ABI_VERSION 2
 
 typedef struct iaamt_session iaamt_session;
 
@@ -123,10 +123,9 @@ IAAMT_C_API iaamt_session * iaamt_c_open(const char * gguf_path,
 
 IAAMT_C_API void iaamt_c_close(iaamt_session * session);
 
-// The rate and channel count the model expects. A caller must resample and
-// channel-match before calling iaamt_c_transcribe; this library deliberately
-// does no resampling, because the caller already owns an audio pipeline and two
-// resamplers disagreeing is worse than one.
+// The rate and channel count the model expects. A caller does not have to match
+// them - iaamt_c_transcribe resamples - but knowing the target rate is useful
+// for reporting and for deciding whether a conversion will happen at all.
 IAAMT_C_API int32_t iaamt_c_sample_rate(const iaamt_session * session);
 IAAMT_C_API int32_t iaamt_c_channels(const iaamt_session * session);
 
@@ -136,9 +135,19 @@ IAAMT_C_API int32_t iaamt_c_channels(const iaamt_session * session);
 IAAMT_C_API int32_t iaamt_c_is_transcription_model(const iaamt_session * session);
 
 // Transcribes planar audio. `channels` holds `n_channels` pointers to
-// `n_samples` floats each, at iaamt_c_sample_rate(). Passing fewer channels
-// than the model wants duplicates the last one, which is what a mono source
-// needs against a stereo model.
+// `n_samples` floats each, at `sample_rate`. Passing fewer channels than the
+// model wants duplicates the last one, which is what a mono source needs
+// against a stereo model.
+//
+// `sample_rate` may be anything; when it differs from iaamt_c_sample_rate() the
+// audio is resampled here. That is deliberate rather than pushed onto the
+// caller: sources are rarely at the model's rate, the CLI already resamples
+// with miniaudio, and two differently-built resamplers do not agree to the last
+// bit - which shows up as differing interval scores for the same input. Doing
+// it in one place keeps every consumer of this model on the same samples.
+//
+// Note times in the result are in samples at iaamt_c_sample_rate(), not at
+// `sample_rate`, because they come from the model's own frame grid.
 //
 // On success returns 0, sets `*out_notes` and `*out_count`, and the caller must
 // release the array with iaamt_c_free_notes. `*out_notes` is NULL when the
@@ -148,6 +157,7 @@ IAAMT_C_API int32_t iaamt_c_transcribe(iaamt_session *            session,
                                        const float * const *      channels,
                                        int32_t                    n_channels,
                                        int64_t                    n_samples,
+                                       int32_t                    sample_rate,
                                        const iaamt_c_params *     params,
                                        iaamt_c_note **            out_notes,
                                        size_t *                   out_count,
