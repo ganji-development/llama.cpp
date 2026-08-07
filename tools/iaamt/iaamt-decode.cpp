@@ -61,8 +61,16 @@ void build_score(const iaamt_window_out & out,
 }
 
 struct interval {
-    int begin;
-    int end;
+    int   begin;
+    int   end;
+    // The semi-CRF score of this interval, score[end*len + begin], as it stood
+    // when the backtrace chose it. Carried out rather than discarded because it
+    // is the only per-note evidence the decode produces: the Viterbi path says
+    // which notes are present but nothing downstream can tell a note the model
+    // was sure of from one it barely admitted. Note that the sanitize pass below
+    // may move `begin` to keep intervals disjoint, and the score is not
+    // recomputed - it stays the score of the interval that was actually chosen.
+    float score;
 };
 
 // viterbiBackward with an all-zero noise score.
@@ -76,7 +84,7 @@ void viterbi_backward(const std::vector<float> & score,
     }
     if (len == 1) {
         if (score[0] > 0.0f) {
-            out.push_back({0, 0});
+            out.push_back({0, 0, score[0]});
         }
         return;
     }
@@ -113,18 +121,18 @@ void viterbi_backward(const std::vector<float> & score,
     while (pos < len - 1) {
         const int sel = ptr[len - pos - 2];
         if (at(pos, pos) > 0.0f) {
-            out.push_back({pos, pos});
+            out.push_back({pos, pos, at(pos, pos)});
         }
         if (sel < 0) {
             pos += 1;
         } else {
             const int end = sel + pos + 1;
-            out.push_back({pos, end});
+            out.push_back({pos, end, at(end, pos)});
             pos = end;
         }
     }
     if (at(len - 1, len - 1) > 0.0f) {
-        out.push_back({len - 1, len - 1});
+        out.push_back({len - 1, len - 1, at(len - 1, len - 1)});
     }
 
     // _sanitize_track_intervals: clamp, drop inversions, keep them disjoint
@@ -324,6 +332,7 @@ int iaamt_stitcher_consume(iaamt_stitcher & st,
             note.velocity     = st.velocity;
             note.has_onset    = flag.has_onset;
             note.has_offset   = flag.has_offset;
+            note.crf_score    = iv.score;
             st.by_track[track].push_back(note);
         }
     }
@@ -367,6 +376,11 @@ std::vector<iaamt_note> iaamt_stitcher_finalize(iaamt_stitcher & st,
             cur.velocity   = std::max(cur.velocity, n.velocity);
             cur.has_onset  = cur.has_onset || n.has_onset;
             cur.has_offset = by_gap ? n.has_offset : (cur.has_offset || n.has_offset);
+            // The pieces being merged are segments of one note, not competing
+            // explanations of it, so the strongest segment is the evidence that
+            // the note is there. Taking the minimum would let a weakly scored
+            // tail drag down a note whose onset the model was certain of.
+            cur.crf_score  = std::max(cur.crf_score, n.crf_score);
             continue;
         }
         merged.push_back(cur);

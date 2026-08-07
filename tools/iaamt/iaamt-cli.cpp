@@ -443,6 +443,23 @@ int main(int argc, char ** argv) {
            notes.size(), secs,
            ((double) total_samples / hp.sample_rate) / std::max(secs, 1e-9));
 
+    // Summarise the semi-CRF scores rather than printing one per note: the
+    // spread is what tells a reader whether the decode discriminated at all.
+    // A run where min and max are nearly equal has ranked nothing, which is
+    // worth seeing without having to dump every note.
+    if (!is_velocity && !notes.empty()) {
+        float lo = notes[0].crf_score;
+        float hi = notes[0].crf_score;
+        double sum = 0.0;
+        for (const iaamt_note & n : notes) {
+            lo = std::min(lo, n.crf_score);
+            hi = std::max(hi, n.crf_score);
+            sum += n.crf_score;
+        }
+        printf("crf    : score min %.3f, mean %.3f, max %.3f\n",
+               lo, sum / (double) notes.size(), hi);
+    }
+
     if (!iaamt_write_midi(params.out_midi, notes, hp.sample_rate, err)) {
         fprintf(stderr, "error: %s\n", err.c_str());
         return 1;

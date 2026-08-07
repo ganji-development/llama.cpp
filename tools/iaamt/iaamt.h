@@ -354,6 +354,23 @@ struct iaamt_note {
     bool  has_offset   = true;
     int   program      = 0;      // GM program, carried through from input MIDI
     bool  is_drum      = false;
+
+    // Semi-CRF score of the interval this note came from: unbounded, positive,
+    // and larger for intervals the model was more willing to pay for. Not a
+    // probability and deliberately not squashed into one here - the mapping to a
+    // confidence depends on what the consumer is comparing against, and doing it
+    // at the source would bake in a choice this decoder has no basis for.
+    // Zero when the note did not come from a Viterbi interval.
+    //
+    // Two things a consumer must know before comparing these. `build_score`
+    // applies `semi_crf_length_scaling` and `semi_crf_length_penalty`, so the
+    // magnitude depends on interval length as well as on the model's
+    // confidence: a long note and a short note with the same score were not
+    // believed equally. And the scale is per-model and per-stem, so a threshold
+    // learned on one checkpoint does not transfer to another. Ranking notes
+    // within a single transcription is what this supports; an absolute cutoff
+    // is not, without a calibration that does not exist yet.
+    float crf_score    = 0.0f;
 };
 
 struct iaamt_decode_params {
